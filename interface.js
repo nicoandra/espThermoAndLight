@@ -6,19 +6,18 @@ server = dgram.createSocket('udp4');
 
 server.on('message', (msg, rinfo) => {
 		stringMsg = msg.toString();
-		console.log("<<< " ,msg, stringMsg, rinfo);
+		console.log("<<< " /*,msg, stringMsg, rinfo*/ , stringMsg);
 })
 
 resetMcu  = [0xFF, 0xFF, 0x00, 0xFF];
 pingBackWithHealthStatus = [0xFF, 0xFF, 0x00, 0x00];
-
-setTemperatureOfHeater1 = [0x11, 0x01, 0x18, 0x00];
-getTemperatureOfHeater1 = [0x10, 0x01, 0x00, 0x00];
+setTemperatureOfHeater1 = [0x11, 0x00, 20, 0x00];
+getTemperatureOfHeater1 = [0x10, 0x00, 0x00, 0x00];
 turnOnRelay1 = [0x21, 0x01, 0x00, 0x01];
 turnOffRelay1 = [0x21, 0x01, 0x00, 0x00];
 getStatusOfRelay1 = [0x20, 0x01, 0x00, 0x00];
 
-payload = pingBackWithHealthStatus;
+payload = setTemperatureOfHeater1;
 server.send(new Buffer(payload), 0, payload.length, port, host, function(err,res){
 	console.log(err, res);
 })

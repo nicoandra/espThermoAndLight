@@ -4,8 +4,8 @@
  * then off for one second, repeatedly.
  */
 #include "Arduino.h"
-
 #include <ESP8266WiFi.h>          //ESP8266 Core WiFi Library (you most likely already have this in your sketch)
+
 
 #include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
 #include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
@@ -30,7 +30,10 @@ char ReplyBuffer[32];
 #define DHTLIVINGPIN D6
 #define DHTTYPE DHT22
 DHT_Unified dhtLiving(DHTLIVINGPIN, DHTTYPE);
-float temperatures[2] = {0,0};
+float measuredTemperatures[2] = {0,0};
+float requestedTemperatures[2] = {19, 19};  // Default temperature to 19. GOod practice.
+int thermostatPower[2] = {0,0};
+unsigned long timeOfLastHeaterPowerUpdate = millis();
 float humidity[2] = {-1,-1};
 float temporaryData[2] = {-1, -1};
 uint32_t delayMS;
@@ -69,10 +72,13 @@ void monitorButton(){
     return ;
   }
 
+  /*Serial.print(ButtonState);
+  Serial.print(PrevButtonState);*/
+
   if(ButtonState == 1 && PrevButtonState == 0){
     Serial.println("BUTTON: PRESSED");
     TimeWhenButtonWasPressed = millis();
-    PrevButtonState = ButtonState;
+    PrevButtonState = 1;
     return ;
   }
 
@@ -94,40 +100,6 @@ void monitorButton(){
     TimeWhenButtonWasPressed = millis();
     return ;
   }
-
-}
-
-
-
-void monitorButtonBackup(){
-  ButtonState = digitalRead(D2);
-  if(ButtonState != PrevButtonState){
-    Serial.print("BUTTON: ");
-    Serial.print(PrevButtonState);
-    Serial.print(" ");
-    Serial.println(ButtonState);
-
-    if(ButtonState == 1){
-      TimeWhenButtonWasPressed = millis();
-    }
-
-    if (ButtonState == 0 && TimeWhenButtonWasPressed + 1500 > millis()) {
-      Serial.println("That was a SHORT press");
-      TimeWhenButtonWasPressed = 0;
-    }
-    PrevButtonState = ButtonState;
-
-  } else {
-
-    if(ButtonState == 1 && PrevButtonState == 1 && TimeWhenButtonWasPressed + 1500 < millis()){
-      Serial.println("That was a LOOOONG press right there");
-      ButtonState = 1;
-      PrevButtonState = 0;
-      TimeWhenButtonWasPressed = millis();
-    }
-
-  }
-  return ;
 }
 
 void sendUdpResponse(char ReplyBuffer[]){
@@ -136,12 +108,15 @@ void sendUdpResponse(char ReplyBuffer[]){
   UDP.endPacket();
 }
 
-
 void listenUdp(){
   // if there’s data available, read a packet
   int packetSize = UDP.parsePacket();
   // Serial.print("Packetsize: ");
   // Serial.println(packetSize);
+
+  int affectedHeater = 0;
+
+  char response[16];
 
   if(packetSize){
     Serial.println("");
@@ -185,11 +160,42 @@ void listenUdp(){
           default: sendUdpResponse((char *)"Last byte should be either 0x00 or 0xFF"); break;
         }
         return ;
+        break;
 
-      case 0x11: break; // Set temperature of heater in position [byte 2
-      case 0x10: break; // Get temperature of heater in position [byte 2
+      case 0x11: // Set temperature of heater in position [byte 2
+        affectedHeater = packetBuffer[1];
 
-      break;
+        if(affectedHeater < 0 || sizeof(requestedTemperatures) / sizeof(float) < affectedHeater){
+          sendUdpResponse((char *)"Heater not found");
+          Serial.println("Heater not found");
+          return ;
+        }
+
+        if(packetBuffer[3] > 9){
+          packetBuffer[3] = 9;
+        }
+        requestedTemperatures[affectedHeater] = (float) packetBuffer[2] + (float) ((float) packetBuffer[3] / 10);
+        // temperatures[affectedHeater] = (float) 0 + (float) (packetBuffer[3] / 10);
+        Serial.print("TOCANDO EL HEATER 1 ");
+        Serial.println(affectedHeater);
+
+        // sprintf(response, "OK %i %.02f", affectedHeater, (float) 24.5);  // This did not work :( throws exception
+        // sprintf(response, "OK %i %i.%i", affectedHeater, 24, 5);
+        // sendUdpResponse((char *)response);
+        // Serial.println(response);
+        // break;
+
+      case 0x10:  // Get temperature of heater in position [byte 2
+        affectedHeater = packetBuffer[1];
+        sprintf(response, "OK %d %d.%d %d.%d", affectedHeater,
+          (int)measuredTemperatures[affectedHeater],
+          (int)(measuredTemperatures[affectedHeater]*10) % 10,
+          (int)requestedTemperatures[affectedHeater],
+          (int)(requestedTemperatures[affectedHeater]*10) % 10);
+        Serial.println(response);
+        sendUdpResponse((char *)response);
+        break;
+
       default:  Serial.println("EEEEEH BEN ...(??)"); break;
     }
 
@@ -200,22 +206,15 @@ void listenUdp(){
       // Serial.println(value);
       Serial.print(value);
       Serial.print("-");
-
-
-      if(i == 0){
-        digitalWrite(D7, value & 1);
-      }
     }
     Serial.println("");
 
 
     // send a reply, to the IP address and port that sent us the packet we received
-    UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
+    /*UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
     UDP.write(ReplyBuffer);
+    */
     UDP.endPacket();
-
-    // turn LED on or off depending on value recieved
-    // digitalWrite(5,value);
   }
 }
 
@@ -253,6 +252,8 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
   ledOff(LED_BUILTIN);
   pinMode(D7, OUTPUT);
+  pinMode(D8, OUTPUT);
+  digitalWrite(D8, LOW);
   pinMode(D2, INPUT); // For the button
   digitalWrite(D2, HIGH);
 
@@ -341,35 +342,27 @@ void loop()
   }
 
   if(timeOfLastTemperatureRead + 15000 < time){
+
     ledOn(D7);
     // If the last read was done more than 2 seconds ago, read!
     readTemp(dhtLiving, temporaryData);
     timeOfLastTemperatureRead = millis();
     Serial.print("Read temperature is: ");
     Serial.println(temporaryData[0]);
+    measuredTemperatures[0] = temporaryData[0];
 
     Serial.print("Read humidity is: ");
     Serial.println(temporaryData[1]);
     ledOff(D7);
   }
 
+  if(timeOfLastHeaterPowerUpdate + 1000 < time){
+    if(measuredTemperatures[0] < requestedTemperatures[0] + 0.2){
+      ledOn(D8);
+    } else {
+      ledOff(D8);
+    }
+  }
+
   monitorButton();
-
-
-/*
-  // turn the LED on (HIGH is the voltage level)
-  digitalWrite(LED_BUILTIN, HIGH);
-  // digitalWrite(D7, HIGH);
-
-  // wait for a second
-  delay(1000);
-  // turn the LED off by making the voltage LOW
-  digitalWrite(LED_BUILTIN, LOW);
-  // digitalWrite(D7, LOW);
-  delay(50);
-  digitalWrite(LED_BUILTIN, HIGH);
-   // wait for a second
-  delay(950);
-  */
-
 }
