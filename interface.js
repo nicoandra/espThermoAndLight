@@ -1,12 +1,21 @@
 const dgram = require('dgram');
 const port = 8888;
 const host = "192.168.1.128"
+// const host = "192.168.1.255"
 
 server = dgram.createSocket('udp4');
 
+/*server.on('listening', function(){
+
+})*/
+
+server.bind(function(){
+	server.setBroadcast(true);
+})
+
 server.on('message', (msg, rinfo) => {
 		stringMsg = msg.toString();
-		console.log("<<< " /*,msg, stringMsg, rinfo*/ , stringMsg);
+		console.log("<<< " ,msg, stringMsg, rinfo);
 })
 
 resetMcu  = [0xFF, 0xFF, 0x00, 0xFF];
@@ -17,7 +26,7 @@ turnOnRelay1 = [0x21, 0x01, 0x00, 0x01];
 turnOffRelay1 = [0x21, 0x01, 0x00, 0x00];
 getStatusOfRelay1 = [0x20, 0x01, 0x00, 0x00];
 
-payload = setTemperatureOfHeater1;
+payload = pingBackWithHealthStatus;
 server.send(new Buffer(payload), 0, payload.length, port, host, function(err,res){
 	console.log(err, res);
 })
