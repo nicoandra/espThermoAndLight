@@ -16,6 +16,7 @@
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <DHT_U.h>
+#include "../lib/ThermoLogic/ThermoLogic.h"
 
 unsigned int localPort = 8888;
 WiFiUDP UDP;
@@ -25,11 +26,14 @@ char packetBuffer[UDP_TX_PACKET_MAX_SIZE]; //buffer to hold incoming packet,
 char ReplyBuffer[32];
 
 
-
 // Setup a DHT22 instance
 #define DHTLIVINGPIN D6
 #define DHTTYPE DHT22
 DHT_Unified dhtLiving(DHTLIVINGPIN, DHTTYPE);
+
+
+ThermoLogic livingThermoLogic(D6, DHT22, D8);
+
 float measuredTemperatures[2] = {0,0};
 float requestedTemperatures[2] = {19, 19};  // Default temperature to 19. GOod practice.
 int thermostatPower[2] = {0,0};
@@ -140,6 +144,10 @@ void listenUdp(){
     if(packetSize != 4){
       sendUdpResponse((char *)"Unknown instruction");
       return ;
+    }
+
+    if(packetBuffer[0] == 0xFF && packetBuffer[1] == 0x00){
+
     }
 
     switch(packetBuffer[0]){
@@ -268,67 +276,8 @@ void setup()
     Serial.println("Listening UDP");
     listenUdp();
   }
-
-
-
-  sensor_t sensor;
-  dhtLiving.temperature().getSensor(&sensor);
-  Serial.println("------------------------------------");
-  Serial.println("Temperature");
-  Serial.print  ("Sensor:       "); Serial.println(sensor.name);
-  Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
-  Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
-  Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" *C");
-  Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" *C");
-  Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" *C");
-  Serial.println("------------------------------------");
-  // Print humidity sensor details.
-  dhtLiving.humidity().getSensor(&sensor);
-  Serial.println("------------------------------------");
-  Serial.println("Humidity");
-  Serial.print  ("Sensor:       "); Serial.println(sensor.name);
-  Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
-  Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
-  Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println("%");
-  Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println("%");
-  Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println("%");
-  Serial.println("------------------------------------");
-  // Set delay between sensor readings based on sensor details.
-  delayMS = sensor.min_delay / 1000;
-
-
-  time = millis();
 }
 
-
-
-void readTemp(DHT_Unified dht, float temporaryData[]){
-  sensors_event_t event;
-    dht.temperature().getEvent(&event);
-    if (isnan(event.temperature)) {
-      // Serial.println("Error reading temperature!");
-      temporaryData[0] = -999999;
-      temporaryData[1] = -999999;
-    } else {
-      // Serial.print("Temperature: ");
-      Serial.print(event.temperature);
-      temporaryData[0] = event.temperature;
-      // Serial.println(" *C");
-    }
-
-    // Get humidity event and print its value.
-    dht.humidity().getEvent(&event);
-    if (isnan(event.relative_humidity)) {
-      // Serial.println("Error reading humidity!");
-      temporaryData[1] = -999999;
-    }  else {
-      // Serial.print("Humidity: ");
-      Serial.print(event.relative_humidity);
-      temporaryData[1] = event.relative_humidity;
-      Serial.println("%");
-    }
-
-}
 
 void loop()
 {
@@ -336,33 +285,17 @@ void loop()
   time = millis();
   listenUdp();
 
-  if(timeOfLastTemperatureRead > time){
-    // Every around 50 days, millis() will reset itself. This catches that situation.
-    timeOfLastTemperatureRead = 0;
+  if(livingThermoLogic.readSensorValues()){
+    Serial.print("LivingThermoLogic value ");
+    Serial.print(livingThermoLogic.getTemperature());
+    Serial.println(":)");
   }
 
-  if(timeOfLastTemperatureRead + 15000 < time){
-
-    ledOn(D7);
-    // If the last read was done more than 2 seconds ago, read!
-    readTemp(dhtLiving, temporaryData);
-    timeOfLastTemperatureRead = millis();
-    Serial.print("Read temperature is: ");
-    Serial.println(temporaryData[0]);
-    measuredTemperatures[0] = temporaryData[0];
-
-    Serial.print("Read humidity is: ");
-    Serial.println(temporaryData[1]);
-    ledOff(D7);
-  }
-
-  if(timeOfLastHeaterPowerUpdate + 1000 < time){
-    if(measuredTemperatures[0] < requestedTemperatures[0] + 0.2){
-      ledOn(D8);
-    } else {
-      ledOff(D8);
-    }
-  }
+  livingThermoLogic.calculatePower();
+  livingThermoLogic.writePwmValues();
+  livingThermoLogic.setDesiredTemperature(10);
 
   monitorButton();
+
+
 }
