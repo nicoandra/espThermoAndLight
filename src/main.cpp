@@ -23,7 +23,7 @@ WiFiUDP UDP;
 boolean udpConnected = false;
 char packetBuffer[UDP_TX_PACKET_MAX_SIZE]; //buffer to hold incoming packet,
 // char ReplyBuffer[] = "Acknowledged";
-char ReplyBuffer[32];
+char replyBuffer[32];
 
 
 // Setup a DHT22 instance
@@ -40,7 +40,6 @@ float desiredTemperature;
 
 boolean connectUDP(){
   boolean state = false;
-
   Serial.println("");
   Serial.println("Connecting to UDP");
 
@@ -60,9 +59,6 @@ void monitorButton(){
     // Serial.println("BUTTON: No changes");
     return ;
   }
-
-  /*Serial.print(ButtonState);
-  Serial.print(PrevButtonState);*/
 
   if(ButtonState == 1 && PrevButtonState == 0){
     Serial.println("BUTTON: PRESSED");
@@ -91,10 +87,15 @@ void monitorButton(){
   }
 }
 
-void sendUdpResponse(char ReplyBuffer[]){
-  UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-  UDP.write(ReplyBuffer);
-  UDP.endPacket();
+
+void sendUdpBuffer(IPAddress host, int port, int buffer[]){
+    UDP.beginPacket(host, port);
+    UDP.write(buffer);
+    UDP.endPacket();
+}
+
+void sendUdpBufferResponse(char replyBuffer[]){
+  sendUdpBuffer(UDP.remoteIP(), UDP.remotePort(), replyBuffer);
 }
 
 void listenUdp(){
@@ -105,7 +106,7 @@ void listenUdp(){
 
   int affectedHeater = 0;
 
-  char response[16];
+  char response[32];
 
   if(packetSize){
     Serial.println("");
@@ -131,14 +132,50 @@ void listenUdp(){
       return ;
     }
 
-    if(packetBuffer[0] == 0xF0 && packetBuffer[1] == 0x00){
+    if(packetBuffer[0] == 0xFF && packetBuffer[1] == 0x00){
+        // Report myself to the requester IP and to the specified port
+		// Payload:	FF 00 XX YY => Ask heaters to report themselves to port XX * 256 + YY
+		// Response:	FF 00 XX YY => Sent to the port specified before. This reports how many temperature sensors and heater has XX, how many 110v outlets has YY
+        int remotePort = packetBuffer[2] * 256 + packetBuffer[3];
+        sendUdpBuffer(UDP.remoteIP(), remotePort, [0xFF, 0x00, 0x01, 0x01]);    // Send real values here, with counts and everything
+        Serial.print("DiscoveryRequest: Sent reply [0xFF, 0x00, 0x01, 0x01] to port ");
+        Serial.println(remotePort);
+        return ;
+    }
 
+    if(packetBuffer[0] == 0x30 && packetBuffer[1] == 0xFF){
+        // Payload      30 FF XX YY =>  Requests for status to be sen back to port
+        // Response	    30 FF AA (Name BB CC DD) EE (FF) =>
+        int remotePort = packetBuffer[2] * 256 + packetBuffer[3];
+        int replyBuffer[256];
+
+        replyBuffer[0] = 0x30;
+        replyBuffer[1] = 0xFF;
+        replyBuffer[2] = 0x01;  // Set real count of heaters here. Hardcoded to 1 now.
+
+        replyBuffer[3] = 0xFF;  // Set real temperature here. Hardcoded for now.
+        replyBuffer[4] = 0xFF;  // Set real temperature here. Hardcoded for now.
+        replyBuffer[5] = 0x01;  // Set real power level of the heater here. Hardcoded for now.
+
+        replyBuffer[6] = 0x01;  // Set real amount of 110v outlets here
+        replyBuffer[7] = 0xFF;  // Set real status of outlet here. There might be more than one
+
+        sendUdpBuffer(UDP.remoteIP(), remotePort, replyBuffer);
+        Serial.print("StatusRequest: Sent reply ");
+        Serial.print(replyBuffer);
+        Serial.print(" to port ");
+        Serial.println(remotePort);
+        return ;
+    }
+
+
+
+    if(packetBuffer[0] == 0x10){
       desiredTemperature = (float) (packetBuffer[2] / 1.0) + ((float) packetBuffer[3] / 0xFF);
       Serial.print("Setting desired temperature to ");
       Serial.println(desiredTemperature);
       livingThermoLogic.setDesiredTemperature(desiredTemperature);
       return ;
-
     }
 
     switch(packetBuffer[0]){
