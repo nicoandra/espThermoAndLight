@@ -27,31 +27,16 @@ char ReplyBuffer[32];
 
 
 // Setup a DHT22 instance
-#define DHTLIVINGPIN D6
-#define DHTTYPE DHT22
-DHT_Unified dhtLiving(DHTLIVINGPIN, DHTTYPE);
-
-
-ThermoLogic livingThermoLogic(D6, DHT22, D8);
-
-float measuredTemperatures[2] = {0,0};
-float requestedTemperatures[2] = {19, 19};  // Default temperature to 19. GOod practice.
-int thermostatPower[2] = {0,0};
-unsigned long timeOfLastHeaterPowerUpdate = millis();
-float humidity[2] = {-1,-1};
-float temporaryData[2] = {-1, -1};
-uint32_t delayMS;
-
-
-// Setup the time tracking variable
-unsigned long time = millis();
-unsigned timeOfLastTemperatureRead = time;
+ThermoLogic livingThermoLogic(D6, DHT22, D0);
 
 // Setup the button reader
 int ButtonState      = 0;
 int PrevButtonState = 0;
 unsigned long TimeWhenButtonWasPressed = millis();
 bool IsALongPress = false;
+
+float desiredTemperature;
+
 
 boolean connectUDP(){
   boolean state = false;
@@ -146,63 +131,21 @@ void listenUdp(){
       return ;
     }
 
-    if(packetBuffer[0] == 0xFF && packetBuffer[1] == 0x00){
+    if(packetBuffer[0] == 0xF0 && packetBuffer[1] == 0x00){
+
+      desiredTemperature = (float) (packetBuffer[2] / 1.0) + ((float) packetBuffer[3] / 0xFF);
+      Serial.print("Setting desired temperature to ");
+      Serial.println(desiredTemperature);
+      livingThermoLogic.setDesiredTemperature(desiredTemperature);
+      return ;
 
     }
 
     switch(packetBuffer[0]){
       case 0xFF:
-        if (packetBuffer[1] != 0xFF){
-          sendUdpResponse((char *)"Commands with 0xFF must continue with 0xFF as well");
-          return;
-        }
-
-        if (packetBuffer[2] != 0x00){
-          sendUdpResponse((char *)"Commands with 0xFF 0xFF must continue with 0x00");
-          return;
-        }
-
-        switch(packetBuffer[3]){
-          case 0x00: sendUdpResponse((char *)"PingBack!"); Serial.println("PingBack!"); break;
-          case 0xFF: sendUdpResponse((char *)"ResetDevice!"); Serial.println("ResetDevice!"); break;
-          default: sendUdpResponse((char *)"Last byte should be either 0x00 or 0xFF"); break;
-        }
-        return ;
         break;
 
       case 0x11: // Set temperature of heater in position [byte 2
-        affectedHeater = packetBuffer[1];
-
-        if(affectedHeater < 0 || sizeof(requestedTemperatures) / sizeof(float) < affectedHeater){
-          sendUdpResponse((char *)"Heater not found");
-          Serial.println("Heater not found");
-          return ;
-        }
-
-        if(packetBuffer[3] > 9){
-          packetBuffer[3] = 9;
-        }
-        requestedTemperatures[affectedHeater] = (float) packetBuffer[2] + (float) ((float) packetBuffer[3] / 10);
-        // temperatures[affectedHeater] = (float) 0 + (float) (packetBuffer[3] / 10);
-        Serial.print("TOCANDO EL HEATER 1 ");
-        Serial.println(affectedHeater);
-
-        // sprintf(response, "OK %i %.02f", affectedHeater, (float) 24.5);  // This did not work :( throws exception
-        // sprintf(response, "OK %i %i.%i", affectedHeater, 24, 5);
-        // sendUdpResponse((char *)response);
-        // Serial.println(response);
-        // break;
-
-      case 0x10:  // Get temperature of heater in position [byte 2
-        affectedHeater = packetBuffer[1];
-        sprintf(response, "OK %d %d.%d %d.%d", affectedHeater,
-          (int)measuredTemperatures[affectedHeater],
-          (int)(measuredTemperatures[affectedHeater]*10) % 10,
-          (int)requestedTemperatures[affectedHeater],
-          (int)(requestedTemperatures[affectedHeater]*10) % 10);
-        Serial.println(response);
-        sendUdpResponse((char *)response);
-        break;
 
       default:  Serial.println("EEEEEH BEN ...(??)"); break;
     }
@@ -252,19 +195,12 @@ void setup()
   Serial.begin(115200);
   Serial.println("Booting...");
 
-  // Start temperature heaters
-  dhtLiving.begin();
-
-
   // initialize LED digital pin as an output.
   pinMode(LED_BUILTIN, OUTPUT);
   ledOff(LED_BUILTIN);
-  pinMode(D7, OUTPUT);
-  pinMode(D8, OUTPUT);
-  digitalWrite(D8, LOW);
+
   pinMode(D2, INPUT); // For the button
   digitalWrite(D2, HIGH);
-
 
   // Network settings
   WiFiManager wifiManager;
@@ -282,7 +218,6 @@ void setup()
 void loop()
 {
 
-  time = millis();
   listenUdp();
 
   if(livingThermoLogic.readSensorValues()){
@@ -293,9 +228,5 @@ void loop()
 
   livingThermoLogic.calculatePower();
   livingThermoLogic.writePwmValues();
-  livingThermoLogic.setDesiredTemperature(10);
-
   monitorButton();
-
-
 }

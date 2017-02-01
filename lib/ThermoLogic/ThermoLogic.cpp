@@ -5,6 +5,8 @@
 
 
 ThermoLogic::ThermoLogic(uint8_t pinDht, uint8_t dhtType, uint8_t pinRelay) : dhtInstance(pinDht, dhtType) {
+  pinMode(pinRelay, OUTPUT);
+  digitalWrite(pinRelay, HIGH);
 
 };
 
@@ -55,6 +57,13 @@ boolean ThermoLogic::readSensorValues(){
 }
 
 void ThermoLogic::calculatePower(){
+
+  if(false){
+    // Hardcoded to test the output pin
+    pwmPower = 5;
+    return;
+  }
+
   if(actualTemperature - desiredTemperature < .5){
     // Desired temperature is 1 degree below the actual temperature. Full power
     // Serial.println("Setting pwmPower to 10");
@@ -89,6 +98,8 @@ boolean ThermoLogic::writePwmValues(){
   pwmTimeOfLastChange = millis();
 
   pwmCounter++;
+
+
   Serial.print(desiredTemperature);
   Serial.print("@ vs ");
   Serial.print(actualTemperature);
@@ -98,19 +109,19 @@ boolean ThermoLogic::writePwmValues(){
   Serial.print(pwmPower);
   Serial.print(" = ");
 
-  if(pwmPower > 0 && pwmPower <= pwmCounter){
-    Serial.println(HIGH);
-    digitalWrite(pinRelay, HIGH);
-    digitalWrite(LED_BUILTIN, HIGH);
-  } else {
+  if(pwmCounter > pwmPower){
     digitalWrite(pinRelay, LOW);
     Serial.println(LOW);
     digitalWrite(LED_BUILTIN, LOW);
+  } else {
+    Serial.println(HIGH);
+    digitalWrite(pinRelay, HIGH);
+    digitalWrite(LED_BUILTIN, HIGH);
   }
 
   if(pwmCounter == 10){
     // Reset counter
-    pwmCounter = -1;
+    pwmCounter = 0;
   }
 
   return true;
