@@ -1,11 +1,16 @@
 /**
- * Blink
- * Turns on an LED on for one second,
- * then off for one second, repeatedly.
- */
+
+Read the docs of Server for a TCP one here:
+
+https://github.com/esp8266/Arduino/blob/master/doc/esp8266wifi/server-class.md
+https://github.com/esp8266/Arduino/blob/master/doc/esp8266wifi/server-examples.md
+https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266WebServer/examples/WebUpdate/WebUpdate.ino
+
+**/
+
+
 #include "Arduino.h"
 #include <ESP8266WiFi.h>          //ESP8266 Core WiFi Library (you most likely already have this in your sketch)
-
 
 #include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
 #include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
