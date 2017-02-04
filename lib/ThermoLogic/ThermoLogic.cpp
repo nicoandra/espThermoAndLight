@@ -3,11 +3,9 @@
 #include <DHT_U.h>
 #include <ThermoLogic.h>
 
-
 ThermoLogic::ThermoLogic(uint8_t pinDht, uint8_t dhtType, uint8_t pinRelay) : dhtInstance(pinDht, dhtType) {
   pinMode(pinRelay, OUTPUT);
   digitalWrite(pinRelay, HIGH);
-
 };
 
 float ThermoLogic::getTemperature() {
@@ -18,8 +16,16 @@ float ThermoLogic::getHumidity() {
   return actualHumidity;
 };
 
+float ThermoLogic::getDesiredTemperature(){
+  return desiredTemperature;
+}
+
 void ThermoLogic::setDesiredTemperature(float parameter){
   desiredTemperature = parameter;
+}
+
+int ThermoLogic::getPower(){
+  return pwmPower;
 }
 
 boolean ThermoLogic::readSensorValues(){
@@ -29,7 +35,7 @@ boolean ThermoLogic::readSensorValues(){
     timeOfLastRead = 0;
   }
 
-  if(timeOfLastRead + 30000 > millis()){
+  if(timeOfLastRead + 5000 > millis()){
     // Not read. Read has been done already
     return false;
   }
@@ -42,7 +48,6 @@ boolean ThermoLogic::readSensorValues(){
     Serial.println("Error reading humidity");
     return false;
   }
-
   actualTemperature = event.temperature;
 
   dhtInstance.humidity().getEvent(&event);
@@ -52,6 +57,7 @@ boolean ThermoLogic::readSensorValues(){
   }
 
   actualHumidity = event.relative_humidity;
+  Serial.println("Sensor: values read.");
   return true;
 
 }
@@ -101,15 +107,15 @@ boolean ThermoLogic::writePwmValues(){
 
 
   Serial.print(desiredTemperature);
-  Serial.print("@ vs ");
+  Serial.print("@ (des) vs ");
   Serial.print(actualTemperature);
-  Serial.print("@ ||| ");
+  Serial.print("@ (cur) ||| ");
   Serial.print(pwmCounter);
-  Serial.print(" vs ");
+  Serial.print(" (loop) vs ");
   Serial.print(pwmPower);
-  Serial.print(" = ");
+  Serial.print("(pow) = ");
 
-  if(pwmCounter > pwmPower){
+  if((int) pwmCounter > (int) pwmPower){
     digitalWrite(pinRelay, LOW);
     Serial.println(LOW);
     digitalWrite(LED_BUILTIN, LOW);

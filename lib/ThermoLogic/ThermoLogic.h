@@ -8,7 +8,7 @@ class ThermoLogic
 
   private:
     float actualTemperature;
-    float desiredTemperature;
+    float desiredTemperature = 19;
     float actualHumidity;
 
     // DHT
@@ -29,8 +29,10 @@ class ThermoLogic
     ThermoLogic (uint8_t pinDht, uint8_t dhtType, uint8_t pinRelay);
     float getTemperature();
     void setDesiredTemperature(float parameter);
+    float getDesiredTemperature();
     float getHumidity();
     void calculatePower();
+    int getPower();
     boolean readSensorValues();
     boolean writePwmValues();
 };

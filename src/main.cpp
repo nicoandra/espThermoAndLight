@@ -92,15 +92,42 @@ void monitorButton(){
   }
 }
 
-
-void sendUdpBuffer(IPAddress host, int port, int buffer[]){
+void sendUdpBuffer(IPAddress host, int port, char buffer[], int length){
     UDP.beginPacket(host, port);
-    UDP.write(buffer);
+    UDP.write(buffer, length);
     UDP.endPacket();
 }
 
-void sendUdpBufferResponse(char replyBuffer[]){
-  sendUdpBuffer(UDP.remoteIP(), UDP.remotePort(), replyBuffer);
+void sendUdpBufferResponse(char replyBuffer[], int length){
+  sendUdpBuffer(UDP.remoteIP(), UDP.remotePort(), replyBuffer, length);
+}
+
+
+void sendStatusResponse(IPAddress ip, int port){
+  char replyBuffer[256];
+
+  replyBuffer[0] = 0x30;
+  replyBuffer[1] = 0xFF;
+  replyBuffer[2] = 0x01;  // Set real count of heaters here. Hardcoded to 1 now.
+
+  replyBuffer[3] = (int) livingThermoLogic.getTemperature();  // Set real temperature here. Hardcoded for now.
+  replyBuffer[4] = (int) ((livingThermoLogic.getTemperature() - (int) livingThermoLogic.getTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
+
+  replyBuffer[5] = (int) livingThermoLogic.getDesiredTemperature();  // Set real temperature here. Hardcoded for now.
+  replyBuffer[6] = (int) ((livingThermoLogic.getDesiredTemperature() - (int) livingThermoLogic.getDesiredTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
+
+  replyBuffer[7] = (int) 1 + livingThermoLogic.getPower() - 1;  // Set real power level of the heater here. Hardcoded for now.
+
+  replyBuffer[8] = (int) livingThermoLogic.getHumidity();  // Set real humidity here. Hardcoded for now.
+  replyBuffer[9] = (int) ((livingThermoLogic.getHumidity() - (int) livingThermoLogic.getHumidity()) * 256.0);
+
+  replyBuffer[10] = 0x01;  // Set real amount of 110v outlets here
+  replyBuffer[11] = 0xFF;  // Set real status of outlet here. There might be more than one
+
+  Serial.print(replyBuffer);
+
+  // sendUdpBuffer(UDP.remoteIP(), remotePort, replyBuffer);
+  sendUdpBuffer(ip, port, replyBuffer, 12);
 }
 
 void listenUdp(){
@@ -133,7 +160,7 @@ void listenUdp(){
     UDP.read(packetBuffer,UDP_TX_PACKET_MAX_SIZE);
 
     if(packetSize != 4){
-      sendUdpResponse((char *)"Unknown instruction");
+      sendUdpBufferResponse((char *)"Unknown instruction", 20);
       return ;
     }
 
@@ -142,7 +169,8 @@ void listenUdp(){
 		// Payload:	FF 00 XX YY => Ask heaters to report themselves to port XX * 256 + YY
 		// Response:	FF 00 XX YY => Sent to the port specified before. This reports how many temperature sensors and heater has XX, how many 110v outlets has YY
         int remotePort = packetBuffer[2] * 256 + packetBuffer[3];
-        sendUdpBuffer(UDP.remoteIP(), remotePort, [0xFF, 0x00, 0x01, 0x01]);    // Send real values here, with counts and everything
+        char buffer[4] = {0xFF, 0x00, 0x01, 0x01};
+        sendUdpBuffer(UDP.remoteIP(), remotePort, buffer, 4);    // Send real values here, with counts and everything
         Serial.print("DiscoveryRequest: Sent reply [0xFF, 0x00, 0x01, 0x01] to port ");
         Serial.println(remotePort);
         return ;
@@ -152,15 +180,17 @@ void listenUdp(){
         // Payload      30 FF XX YY =>  Requests for status to be sen back to port
         // Response	    30 FF AA (Name BB CC DD) EE (FF) =>
         int remotePort = packetBuffer[2] * 256 + packetBuffer[3];
-        int replyBuffer[256];
+
+        /*char replyBuffer[256];
 
         replyBuffer[0] = 0x30;
         replyBuffer[1] = 0xFF;
         replyBuffer[2] = 0x01;  // Set real count of heaters here. Hardcoded to 1 now.
 
-        replyBuffer[3] = 0xFF;  // Set real temperature here. Hardcoded for now.
-        replyBuffer[4] = 0xFF;  // Set real temperature here. Hardcoded for now.
-        replyBuffer[5] = 0x01;  // Set real power level of the heater here. Hardcoded for now.
+        replyBuffer[3] = (int) livingThermoLogic.getTemperature();  // Set real temperature here. Hardcoded for now.
+        replyBuffer[4] = (int) ((livingThermoLogic.getTemperature() - (int) livingThermoLogic.getTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
+
+        replyBuffer[5] = livingThermoLogic.getPower();  // Set real power level of the heater here. Hardcoded for now.
 
         replyBuffer[6] = 0x01;  // Set real amount of 110v outlets here
         replyBuffer[7] = 0xFF;  // Set real status of outlet here. There might be more than one
@@ -170,46 +200,33 @@ void listenUdp(){
         Serial.print(replyBuffer);
         Serial.print(" to port ");
         Serial.println(remotePort);
+        */
+        sendStatusResponse(UDP.remoteIP(), remotePort);
+        Serial.print("StatusRequest: Sent reply ");
+        Serial.print(" to port ");
+        Serial.println(remotePort);
+
         return ;
     }
 
-
-
     if(packetBuffer[0] == 0x10){
       desiredTemperature = (float) (packetBuffer[2] / 1.0) + ((float) packetBuffer[3] / 0xFF);
+      livingThermoLogic.setDesiredTemperature(desiredTemperature);
       Serial.print("Setting desired temperature to ");
       Serial.println(desiredTemperature);
-      livingThermoLogic.setDesiredTemperature(desiredTemperature);
+      sendStatusResponse(UDP.remoteIP(), UDP.remotePort());
+      Serial.print("SetTemperature: Sent reply ");
+      Serial.print(" to port ");
+      Serial.println(UDP.remotePort());
       return ;
     }
 
-    switch(packetBuffer[0]){
-      case 0xFF:
-        break;
-
-      case 0x11: // Set temperature of heater in position [byte 2
-
-      default:  Serial.println("EEEEEH BEN ...(??)"); break;
-    }
+    return ;
+  } // End of if(packetSize);
 
 
-    Serial.println("Contents:");
-    for(int i = 0; i < packetSize; i++){
-      int value = packetBuffer[i];
-      // Serial.println(value);
-      Serial.print(value);
-      Serial.print("-");
-    }
-    Serial.println("");
+} // End of void listenUdp();
 
-
-    // send a reply, to the IP address and port that sent us the packet we received
-    /*UDP.beginPacket(UDP.remoteIP(), UDP.remotePort());
-    UDP.write(ReplyBuffer);
-    */
-    UDP.endPacket();
-  }
-}
 
 
 void ledOn(int pinNumber){
