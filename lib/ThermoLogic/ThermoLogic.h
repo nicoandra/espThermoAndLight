@@ -28,7 +28,7 @@ class ThermoLogic
   public:
     ThermoLogic (uint8_t pinDht, uint8_t dhtType, uint8_t pinRelay);
     float getTemperature();
-    void setDesiredTemperature(float parameter);
+    bool setDesiredTemperature(float parameter);
     float getDesiredTemperature();
     float getHumidity();
     void calculatePower();

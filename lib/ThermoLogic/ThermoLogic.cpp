@@ -20,8 +20,10 @@ float ThermoLogic::getDesiredTemperature(){
   return desiredTemperature;
 }
 
-void ThermoLogic::setDesiredTemperature(float parameter){
+bool ThermoLogic::setDesiredTemperature(float parameter){
   desiredTemperature = parameter;
+  ThermoLogic::calculatePower();
+  return true;
 }
 
 int ThermoLogic::getPower(){
@@ -35,7 +37,7 @@ boolean ThermoLogic::readSensorValues(){
     timeOfLastRead = 0;
   }
 
-  if(timeOfLastRead + 5000 > millis()){
+  if(timeOfLastRead + 10000 > millis()){
     // Not read. Read has been done already
     return false;
   }
@@ -57,37 +59,29 @@ boolean ThermoLogic::readSensorValues(){
   }
 
   actualHumidity = event.relative_humidity;
-  Serial.println("Sensor: values read.");
+  // Serial.println("Sensor: values read.");
   return true;
 
 }
 
 void ThermoLogic::calculatePower(){
 
-  if(false){
-    // Hardcoded to test the output pin
-    pwmPower = 5;
-    return;
-  }
+  float diff = actualTemperature - desiredTemperature;
 
-  if(actualTemperature - desiredTemperature < .5){
-    // Desired temperature is 1 degree below the actual temperature. Full power
-    // Serial.println("Setting pwmPower to 10");
+  if(diff < 0){
+    // The actual temperature is below the desired one.
+    // For a negative result, full power.
     pwmPower = 10;
     return ;
   }
 
-  if(actualTemperature - desiredTemperature > .5){
-    // The current temperature is above the desired one. Set power to 0.
-    // Serial.println("Setting pwmPower to 0");
-    pwmPower = 0;
-    return ;
+  if(0 <= diff && diff <= .5){
+    // We're in the .5 window
+    pwmPower = 5;
+    return;
   }
-
-  // When between, set power to 50%
-  // Serial.println("Setting pwmPower to 5");
-  pwmPower = 5;
-  return ;
+  pwmPower = 0;
+  
 }
 
 
@@ -96,7 +90,7 @@ boolean ThermoLogic::writePwmValues(){
     pwmTimeOfLastChange = 0;
   }
 
-  if(pwmTimeOfLastChange + 2000 > millis()){
+  if(pwmTimeOfLastChange + 500 > millis()){
     // Not a second passed yet, skip
     return false;
   }
@@ -106,24 +100,30 @@ boolean ThermoLogic::writePwmValues(){
   pwmCounter++;
 
 
+  /*
   Serial.print(desiredTemperature);
   Serial.print("@ (des) vs ");
   Serial.print(actualTemperature);
-  Serial.print("@ (cur) ||| ");
+  Serial.print("@ (cur) ||| Is ");
   Serial.print(pwmCounter);
-  Serial.print(" (loop) vs ");
+  Serial.print(" (loop) > ");
   Serial.print(pwmPower);
-  Serial.print("(pow) = ");
+  Serial.print("(pow) ? ");
+  */
+
+  int onOff;
 
   if((int) pwmCounter > (int) pwmPower){
-    digitalWrite(pinRelay, LOW);
-    Serial.println(LOW);
-    digitalWrite(LED_BUILTIN, LOW);
+    // Inversed because of the weird relays... sorry
+    onOff = HIGH;
   } else {
-    Serial.println(HIGH);
-    digitalWrite(pinRelay, HIGH);
-    digitalWrite(LED_BUILTIN, HIGH);
+    onOff = LOW;
   }
+
+  digitalWrite(pinRelay, onOff);
+  digitalWrite(LED_BUILTIN, onOff);
+  // Serial.println(onOff);
+
 
   if(pwmCounter == 10){
     // Reset counter
