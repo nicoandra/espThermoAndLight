@@ -66,7 +66,7 @@ boolean ThermoLogic::readSensorValues(){
 
 void ThermoLogic::calculatePower(){
 
-  float diff = actualTemperature - desiredTemperature;
+  float diff = (actualTemperature - 0.1) - desiredTemperature;
 
   if(diff < 0){
     // The actual temperature is below the desired one.
@@ -75,13 +75,14 @@ void ThermoLogic::calculatePower(){
     return ;
   }
 
-  if(0 <= diff && diff <= .5){
+  if(0 <= diff && diff <= .3){
     // We're in the .5 window
     pwmPower = 5;
     return;
   }
+
   pwmPower = 0;
-  
+  return ;
 }
 
 

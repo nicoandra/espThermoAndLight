@@ -58,40 +58,6 @@ boolean connectUDP(){
   return state;
 }
 
-void monitorButton(){
-  ButtonState = digitalRead(D2);
-  if(ButtonState == 0 && PrevButtonState == 0){
-    // Serial.println("BUTTON: No changes");
-    return ;
-  }
-
-  if(ButtonState == 1 && PrevButtonState == 0){
-    Serial.println("BUTTON: PRESSED");
-    TimeWhenButtonWasPressed = millis();
-    PrevButtonState = 1;
-    return ;
-  }
-
-  if(ButtonState == 0 && PrevButtonState == 1){
-    if(IsALongPress){
-      Serial.println("BUTTON: RELEASED AFTER LONG PRESS. IGNORE.");
-    } else {
-      Serial.println("BUTTON: RELEASED AFTER SHORT PRESS. ACTION!");
-    }
-    IsALongPress = false;
-    TimeWhenButtonWasPressed = 0;
-    PrevButtonState = ButtonState;
-    return ;
-  }
-
-  if(!IsALongPress && ButtonState == 1 && PrevButtonState == 1 && TimeWhenButtonWasPressed + 1500 < millis()){
-    Serial.println("BUTTON: STILL IN LONG PRESS");
-    IsALongPress = true;
-    TimeWhenButtonWasPressed = millis();
-    return ;
-  }
-}
-
 void sendUdpBuffer(IPAddress host, int port, char buffer[], int length){
     UDP.beginPacket(host, port);
     UDP.write(buffer, length);
@@ -247,6 +213,16 @@ void setup()
 }
 
 
+void broadcastButtonAction(){
+  char buffer[4] = { 0x41, 0xFF, 0x00, 0x01 };
+  sendUdpBuffer( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888, buffer, 4);
+}
+
+void broadcastButtonLongPress(){
+  char buffer[4] = { 0x41, 0xFF, 0x00, 0x02 };
+  sendUdpBuffer( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888, buffer, 4);
+}
+
 void broadcastCurrentStatus(){
   // sendStatusResponse({192, 168, 1, 255}, 8888);
 }
@@ -267,6 +243,46 @@ void broadcastCurrentStatusPeriodically(){
   broadcastCurrentStatus();
 
 }
+
+
+
+void monitorButton(){
+  ButtonState = digitalRead(D2);
+  if(ButtonState == 0 && PrevButtonState == 0){
+    // Serial.println("BUTTON: No changes");
+    return ;
+  }
+
+  if(ButtonState == 1 && PrevButtonState == 0){
+    Serial.println("BUTTON: PRESSED");
+    TimeWhenButtonWasPressed = millis();
+    PrevButtonState = 1;
+    return ;
+  }
+
+  if(ButtonState == 0 && PrevButtonState == 1){
+    if(IsALongPress){
+      Serial.println("BUTTON: RELEASED AFTER LONG PRESS. IGNORE.");
+    } else {
+      broadcastButtonAction();
+      Serial.println("BUTTON: RELEASED AFTER SHORT PRESS. ACTION!");
+
+    }
+    IsALongPress = false;
+    TimeWhenButtonWasPressed = 0;
+    PrevButtonState = ButtonState;
+    return ;
+  }
+
+  if(!IsALongPress && ButtonState == 1 && PrevButtonState == 1 && TimeWhenButtonWasPressed + 1500 < millis()){
+    Serial.println("BUTTON: STILL IN LONG PRESS");
+    broadcastButtonLongPress();
+    IsALongPress = true;
+    TimeWhenButtonWasPressed = millis();
+    return ;
+  }
+}
+
 
 void loop()
 {
