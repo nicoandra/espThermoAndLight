@@ -48,17 +48,22 @@ boolean ThermoLogic::readSensorValues(){
   dhtInstance.temperature().getEvent(&event);
   if (isnan(event.temperature)) {
     Serial.println("Error reading humidity");
-    return false;
+    actualTemperature = 900;
+  } else {
+    actualTemperature = event.temperature;
   }
-  actualTemperature = event.temperature;
+
 
   dhtInstance.humidity().getEvent(&event);
   if (isnan(event.relative_humidity)) {
     Serial.println("Error reading humidity");
-    return false;
+    actualHumidity = 900
+    ;
+  } else {
+    actualHumidity = event.relative_humidity;
   }
 
-  actualHumidity = event.relative_humidity;
+
   // Serial.println("Sensor: values read.");
   return true;
 
@@ -68,14 +73,14 @@ void ThermoLogic::calculatePower(){
 
   float diff = (actualTemperature - 0.1) - desiredTemperature;
 
-  if(diff < 0){
+  if(diff < -0.1){
     // The actual temperature is below the desired one.
     // For a negative result, full power.
     pwmPower = 10;
     return ;
   }
 
-  if(0 <= diff && diff <= .3){
+  if(-0.1 <= diff && diff <= .1){
     // We're in the .5 window
     pwmPower = 5;
     return;
