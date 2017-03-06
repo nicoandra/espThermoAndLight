@@ -6,6 +6,10 @@ Turn on your ESP8266. Connect to the Wifi network it creates and setup the wifi 
 It will reboot and Connect to the specified network.
 If it fails, it will set itself in Access-Point mode again.
 
+# Connections
+
+D3: Movement detector INPUT. Code works with HC-SR501, read  http://henrysbench.capnfatz.com/henrys-bench/arduino-sensors-and-input/arduino-hc-sr501-motion-sensor-tutorial/
+
 
 # To Do
 * Have a method to reply back with the actual values

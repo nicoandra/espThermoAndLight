@@ -40,7 +40,10 @@ int PrevButtonState = 0;
 unsigned long TimeWhenButtonWasPressed = millis();
 bool IsALongPress = false;
 
-uint8_t timeOfLastStream = 0;
+uint32_t timeOfLastStream = 0;
+uint32_t timeOfLastMovement = 0;
+
+int movementSensorDataPin = D8;
 
 
 boolean connectUDP(){
@@ -200,6 +203,10 @@ void setup()
   pinMode(D2, INPUT); // For the button
   digitalWrite(D2, HIGH);
 
+
+  pinMode(movementSensorDataPin, INPUT); // For the movement detector sensor
+  digitalWrite(movementSensorDataPin, LOW);
+
   // Network settings
   WiFiManager wifiManager;
   // wifiManager.autoConnect("AP-NAME", "AP-PASSWORD");
@@ -212,6 +219,11 @@ void setup()
   }
 }
 
+
+void broadcastMovementDetectedAction(){
+  char buffer[4] = { 0x11, 0x00, 0x00, 0x01 };
+  sendUdpBuffer( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888, buffer, 4);
+}
 
 void broadcastButtonAction(){
   char buffer[4] = { 0x41, 0xFF, 0x00, 0x01 };
@@ -244,6 +256,33 @@ void broadcastCurrentStatusPeriodically(){
 
 }
 
+
+void handleMovementDetection(){
+
+  if(!digitalRead(movementSensorDataPin)){
+    return ;
+  }
+
+  if(millis() < 65000){
+    Serial.println("Sensor's still Initializing ...");
+    return ;
+  }
+
+  if(
+    timeOfLastMovement + 10000 < millis()
+     ||
+    timeOfLastMovement > millis() // To handle rollover after 72 minutes
+  ){
+    timeOfLastMovement = millis();
+    Serial.print("Last:");
+    Serial.print(timeOfLastMovement);
+    Serial.print("- Now:");
+    Serial.print(millis());
+    Serial.println("MOVIMIENTO!");
+    broadcastMovementDetectedAction();
+  }
+
+}
 
 
 void monitorButton(){
@@ -301,5 +340,6 @@ void loop()
 
   monitorButton();
   broadcastCurrentStatusPeriodically();
+  handleMovementDetection();
 
 }
