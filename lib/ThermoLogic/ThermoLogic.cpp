@@ -80,7 +80,7 @@ void ThermoLogic::calculatePower(){
     return ;
   }
 
-  if(-0.1 <= diff && diff <= .1){
+  if(-0.1 <= diff && diff <= .2){
     // We're in the .5 window
     pwmPower = 5;
     return;
@@ -96,7 +96,7 @@ boolean ThermoLogic::writePwmValues(){
     pwmTimeOfLastChange = 0;
   }
 
-  if(pwmTimeOfLastChange + 500 > millis()){
+  if(pwmTimeOfLastChange + 1000 > millis()){
     // Not a second passed yet, skip
     return false;
   }
@@ -104,18 +104,6 @@ boolean ThermoLogic::writePwmValues(){
   pwmTimeOfLastChange = millis();
 
   pwmCounter++;
-
-
-  /*
-  Serial.print(desiredTemperature);
-  Serial.print("@ (des) vs ");
-  Serial.print(actualTemperature);
-  Serial.print("@ (cur) ||| Is ");
-  Serial.print(pwmCounter);
-  Serial.print(" (loop) > ");
-  Serial.print(pwmPower);
-  Serial.print("(pow) ? ");
-  */
 
   int onOff;
 
@@ -127,9 +115,6 @@ boolean ThermoLogic::writePwmValues(){
   }
 
   digitalWrite(pinRelay, onOff);
-  digitalWrite(LED_BUILTIN, onOff);
-  // Serial.println(onOff);
-
 
   if(pwmCounter == 10){
     // Reset counter

@@ -333,6 +333,60 @@ void monitorButton(){
   }
 }
 
+
+
+void blinkLedAccordingToPower(){
+  int power = (int) 1 + livingThermoLogic.getPower() - 1;
+
+  if(power == 0){
+    // When power is off, the led will turn ON once every 5 seconds, for 1/10th of a second
+    if(millis() % 5000 == 0 || (millis() - 100) % 5000 == 0){
+      if(millis() % 5000 == 0){
+        ledOn(LED_BUILTIN);
+      } else {
+        ledOff(LED_BUILTIN);
+      }
+    }
+    return;
+  }
+
+  if(power == 5){
+    if(
+      millis() % 5000 == 0 ||
+      (millis() - 100) % 5000 == 0 ||
+      (millis() - 500) % 5000 == 0 ||
+      (millis() - 600) % 5000 == 0){
+
+      if(millis() % 5000 == 0 || (millis() - 500) % 5000 == 0){
+          ledOn(LED_BUILTIN);
+        } else {
+          ledOff(LED_BUILTIN);
+        }
+        return;
+    }
+  }
+
+
+  if(power == 10){
+    if(
+      millis() % 5000 == 0 ||
+      (millis() - 100) % 5000 == 0 ||
+      (millis() - 500) % 5000 == 0 ||
+      (millis() - 600) % 5000 == 0 ||
+      (millis() - 1000) % 5000 == 0 ||
+      (millis() - 1100) % 5000 == 0
+    ){
+
+      if(millis() % 5000 == 0 || (millis() - 500) % 5000 == 0 || (millis() - 1000) % 5000 == 0){
+          ledOn(LED_BUILTIN);
+        } else {
+          ledOff(LED_BUILTIN);
+        }
+        return;
+    }
+  }
+}
+
 void loop(){
 
   listenUdp();
@@ -347,8 +401,9 @@ void loop(){
   livingThermoLogic.calculatePower();
   livingThermoLogic.writePwmValues();
 
+  blinkLedAccordingToPower();
+
   monitorButton();
   broadcastCurrentStatusPeriodically();
   handleMovementDetection();
-
 }
