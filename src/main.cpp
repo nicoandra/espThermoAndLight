@@ -46,6 +46,9 @@ uint32_t timeOfLastMovement = 0;
 int movementSensorDataPin = D8;
 
 
+int ledOnOfPin = D7;
+int ledPower = 0;
+
 boolean connectUDP(){
   boolean state = false;
   Serial.println("");
@@ -71,7 +74,6 @@ void sendUdpBufferResponse(char buffer[], int length){
   sendUdpBuffer(UDP.remoteIP(), UDP.remotePort(), buffer, length);
 }
 
-
 void sendStatusResponse(IPAddress ip, int port){
   char responseReplyBuffer[256];
 
@@ -94,12 +96,18 @@ void sendStatusResponse(IPAddress ip, int port){
   responseReplyBuffer[9] = (int) ((livingThermoLogic.getHumidity() - (int) livingThermoLogic.getHumidity()) * 256.0);
 
   responseReplyBuffer[10] = 0x01;  // Set real amount of 110v outlets here
-  responseReplyBuffer[11] = 0xFF;  // Set real status of outlet here. There might be more than one
-
-  // Serial.print(replyBuffer);
+  responseReplyBuffer[11] = (int) ledPower / 256;  // Set real status of outlet here. There might be more than one
+  responseReplyBuffer[12] = (int) (ledPower - (256 * responseReplyBuffer[11])) % 256;  // Set real status of outlet here. There might be more than one
 
   // sendUdpBuffer(UDP.remoteIP(), remotePort, replyBuffer);
   sendUdpBuffer(ip, port, responseReplyBuffer, 12);
+}
+
+void setLedPower(int value){
+  analogWrite(ledOnOfPin, constrain(value, 0, 1023));
+  ledPower = value;
+  Serial.print("LedPower set to");
+  Serial.println(ledPower);
 }
 
 void listenUdp(){
@@ -165,13 +173,17 @@ void listenUdp(){
       return ;
     }
 
+    if(packetBuffer[0] == 0x20){
+      setLedPower(packetBuffer[2] * 256 + packetBuffer[3]);
+      sendStatusResponse(UDP.remoteIP(), UDP.remotePort());
+      return ;
+    }
+
     return ;
   } // End of if(packetSize);
 
 
 } // End of void listenUdp();
-
-
 
 void ledOn(int pinNumber){
   if(LED_BUILTIN == pinNumber){
@@ -206,6 +218,8 @@ void setup()
 
   pinMode(movementSensorDataPin, INPUT); // For the movement detector sensor
   digitalWrite(movementSensorDataPin, LOW);
+
+  pinMode(ledOnOfPin, OUTPUT);
 
   // Network settings
   WiFiManager wifiManager;
@@ -256,7 +270,6 @@ void broadcastCurrentStatusPeriodically(){
 
 }
 
-
 void handleMovementDetection(){
 
   if(!digitalRead(movementSensorDataPin)){
@@ -281,9 +294,7 @@ void handleMovementDetection(){
     Serial.println("MOVIMIENTO!");
     broadcastMovementDetectedAction();
   }
-
 }
-
 
 void monitorButton(){
   ButtonState = digitalRead(D2);
@@ -322,9 +333,7 @@ void monitorButton(){
   }
 }
 
-
-void loop()
-{
+void loop(){
 
   listenUdp();
 
