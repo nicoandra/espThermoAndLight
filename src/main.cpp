@@ -32,7 +32,7 @@ char replyBuffer[32];
 
 
 // Setup a DHT22 instance
-ThermoLogic livingThermoLogic(D6, DHT22, D0);
+ThermoLogic livingThermoLogic(D6, DHT22, D3);
 
 // Setup the button reader
 int ButtonState      = 0;
