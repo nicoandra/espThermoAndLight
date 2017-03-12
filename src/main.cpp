@@ -32,7 +32,8 @@ char replyBuffer[32];
 
 
 // Setup a DHT22 instance
-ThermoLogic livingThermoLogic(D6, DHT22, D3);
+ThermoLogic port1ThermoLogic(D6, DHT22, D3);
+ThermoLogic port2ThermoLogic(D4, DHT22, D7);  // 2nd Thermo
 
 // Setup the button reader
 int ButtonState      = 0;
@@ -46,7 +47,7 @@ uint32_t timeOfLastMovement = 0;
 int movementSensorDataPin = D8;
 
 
-int ledOnOfPin = D7;
+int ledOnOfPin = D0; // NOT IN USE
 int ledPower = 0;
 
 boolean connectUDP(){
@@ -81,26 +82,41 @@ void sendStatusResponse(IPAddress ip, int port){
   responseReplyBuffer[1] = 0xFF;
   responseReplyBuffer[2] = 0x01;  // Set real count of heaters here. Hardcoded to 1 now.
 
-  responseReplyBuffer[3] = (int) livingThermoLogic.getTemperature();
-  responseReplyBuffer[4] = (int) ((livingThermoLogic.getTemperature() - (int) livingThermoLogic.getTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
+  responseReplyBuffer[3] = (int) port1ThermoLogic.getTemperature();
+  responseReplyBuffer[4] = (int) ((port1ThermoLogic.getTemperature() - (int) port1ThermoLogic.getTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
 
-  Serial.print("Response: desired temperature is ");
-  Serial.println(livingThermoLogic.getDesiredTemperature());
+  Serial.print("Response: desired temperature [1] is ");
+  Serial.println(port1ThermoLogic.getDesiredTemperature());
 
-  responseReplyBuffer[5] = (int) livingThermoLogic.getDesiredTemperature();  // Set real temperature here. Hardcoded for now.
-  responseReplyBuffer[6] = (int) ((livingThermoLogic.getDesiredTemperature() - (int) livingThermoLogic.getDesiredTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
+  responseReplyBuffer[5] = (int) port1ThermoLogic.getDesiredTemperature();  // Set real temperature here. Hardcoded for now.
+  responseReplyBuffer[6] = (int) ((port1ThermoLogic.getDesiredTemperature() - (int) port1ThermoLogic.getDesiredTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
 
-  responseReplyBuffer[7] = (int) 1 + livingThermoLogic.getPower() - 1;  // Set real power level of the heater here. Hardcoded for now.
+  responseReplyBuffer[7] = (int) 1 + port1ThermoLogic.getPower() - 1;  // Set real power level of the heater here. Hardcoded for now.
 
-  responseReplyBuffer[8] = (int) livingThermoLogic.getHumidity();  // Set real humidity here. Hardcoded for now.
-  responseReplyBuffer[9] = (int) ((livingThermoLogic.getHumidity() - (int) livingThermoLogic.getHumidity()) * 256.0);
+  responseReplyBuffer[8] = (int) port1ThermoLogic.getHumidity();  // Set real humidity here. Hardcoded for now.
+  responseReplyBuffer[9] = (int) ((port1ThermoLogic.getHumidity() - (int) port1ThermoLogic.getHumidity()) * 256.0);
 
-  responseReplyBuffer[10] = 0x01;  // Set real amount of 110v outlets here
-  responseReplyBuffer[11] = (int) ledPower / 256;  // Set real status of outlet here. There might be more than one
-  responseReplyBuffer[12] = (int) (ledPower - (256 * responseReplyBuffer[11])) % 256;  // Set real status of outlet here. There might be more than one
+
+  Serial.print("Response: desired temperature [2] is ");
+  Serial.println(port2ThermoLogic.getDesiredTemperature());
+
+  responseReplyBuffer[10] = (int) port2ThermoLogic.getTemperature();
+  responseReplyBuffer[11] = (int) ((port2ThermoLogic.getTemperature() - (int) port2ThermoLogic.getTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
+
+  responseReplyBuffer[12] = (int) port2ThermoLogic.getDesiredTemperature();  // Set real temperature here. Hardcoded for now.
+  responseReplyBuffer[13] = (int) ((port2ThermoLogic.getDesiredTemperature() - (int) port2ThermoLogic.getDesiredTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
+
+  responseReplyBuffer[14] = (int) 1 + port2ThermoLogic.getPower() - 1;  // Set real power level of the heater here. Hardcoded for now.
+
+  responseReplyBuffer[15] = (int) port2ThermoLogic.getHumidity();  // Set real humidity here. Hardcoded for now.
+  responseReplyBuffer[16] = (int) ((port2ThermoLogic.getHumidity() - (int) port2ThermoLogic.getHumidity()) * 256.0);
+
+  responseReplyBuffer[17] = 0x01;  // Set real amount of 110v outlets here
+  responseReplyBuffer[18] = (int) ledPower / 256;  // Set real status of outlet here. There might be more than one
+  responseReplyBuffer[19] = (int) (ledPower - (256 * responseReplyBuffer[11])) % 256;  // Set real status of outlet here. There might be more than one
 
   // sendUdpBuffer(UDP.remoteIP(), remotePort, replyBuffer);
-  sendUdpBuffer(ip, port, responseReplyBuffer, 12);
+  sendUdpBuffer(ip, port, responseReplyBuffer, 20);
 }
 
 void setLedPower(int value){
@@ -113,8 +129,6 @@ void setLedPower(int value){
 void listenUdp(){
   // if there’s data available, read a packet
   int packetSize = UDP.parsePacket();
-
-  char response[32];
 
   if(packetSize){
     // Serial.println("");
@@ -163,10 +177,21 @@ void listenUdp(){
     }
 
     if(packetBuffer[0] == 0x10){
-      float desiredTemperature = (float) (packetBuffer[2] / 1.0) + ((float) packetBuffer[3] / 0xFF);
-      livingThermoLogic.setDesiredTemperature(desiredTemperature);
-      Serial.print("Setting desired temperature to ");
-      Serial.println(desiredTemperature);
+
+
+      if(packetBuffer[1] == 1){
+        float desiredTemperature = (float) (packetBuffer[2] / 1.0) + ((float) packetBuffer[3] / 0xFF);
+        port1ThermoLogic.setDesiredTemperature(desiredTemperature);
+        Serial.print("Setting desired temperature [1] to ");
+        Serial.println(desiredTemperature);
+      }
+
+      if(packetBuffer[1] == 2){
+        float desiredTemperature = (float) (packetBuffer[2] / 1.0) + ((float) packetBuffer[3] / 0xFF);
+        port2ThermoLogic.setDesiredTemperature(desiredTemperature);
+        Serial.print("Setting desired temperature [2] to ");
+        Serial.println(desiredTemperature);
+      }
       sendStatusResponse(UDP.remoteIP(), UDP.remotePort());
       // Serial.print("SetTemperature: Sent reply to port ");
       // Serial.println(UDP.remotePort());
@@ -336,7 +361,7 @@ void monitorButton(){
 
 
 void blinkLedAccordingToPower(){
-  int power = (int) 1 + livingThermoLogic.getPower() - 1;
+  int power = (int) 1 + port1ThermoLogic.getPower() - 1;
 
   if(power == 0){
     // When power is off, the led will turn ON once every 5 seconds, for 1/10th of a second
@@ -391,15 +416,26 @@ void loop(){
 
   listenUdp();
 
-  if(livingThermoLogic.readSensorValues()){
-    Serial.print("LivingThermoLogic values: Temp: ");
-    Serial.print(livingThermoLogic.getTemperature());
+  if(port1ThermoLogic.readSensorValues()){
+    Serial.print("port1ThermoLogic values: Temp: ");
+    Serial.print(port1ThermoLogic.getTemperature());
     Serial.print("*C , Humid: ");
-    Serial.println(livingThermoLogic.getHumidity());
+    Serial.println(port1ThermoLogic.getHumidity());
   }
 
-  livingThermoLogic.calculatePower();
-  livingThermoLogic.writePwmValues();
+  port1ThermoLogic.calculatePower();
+  port1ThermoLogic.writePwmValues();
+
+
+  if(port2ThermoLogic.readSensorValues()){
+    Serial.print("port2ThermoLogic values: Temp: ");
+    Serial.print(port2ThermoLogic.getTemperature());
+    Serial.print("*C , Humid: ");
+    Serial.println(port2ThermoLogic.getHumidity());
+  }
+
+  port2ThermoLogic.calculatePower();
+  port2ThermoLogic.writePwmValues();
 
   blinkLedAccordingToPower();
 
