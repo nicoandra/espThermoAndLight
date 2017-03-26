@@ -1,14 +1,22 @@
 # espThermoAndLight
 
-
 # Setup
 Turn on your ESP8266. Connect to the Wifi network it creates and setup the wifi network.
 It will reboot and Connect to the specified network.
 If it fails, it will set itself in Access-Point mode again.
 
 # Connections
+D1: DHT-22 #1 OK
+D2: DTH-22 #2 OK
 
-D3: Movement detector INPUT. Code works with HC-SR501, read  http://henrysbench.capnfatz.com/henrys-bench/arduino-sensors-and-input/arduino-hc-sr501-motion-sensor-tutorial/
+D3: Relay heater 1 OK
+D4: Relay heater 2 OK
+
+D5: PIR Sensor 1 OK
+D6: PIR Sensor 2 OK
+
+# Hardware
+Movement detector: Code works with HC-SR501, read  http://henrysbench.capnfatz.com/henrys-bench/arduino-sensors-and-input/arduino-hc-sr501-motion-sensor-tutorial/
 
 
 # To Do

@@ -16,6 +16,8 @@ https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266WebServer/exampl
 #include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
 
+#include "../lib/PirHcSr501/PirHcSr501.h"
+
 
 // Thermostat functionality
 #include <Adafruit_Sensor.h>
@@ -34,6 +36,9 @@ char replyBuffer[32];
 // Setup a DHT22 instance
 ThermoLogic port1ThermoLogic(D6, DHT22, D3);
 ThermoLogic port2ThermoLogic(D4, DHT22, D7);  // 2nd Thermo
+
+PinHcSr501 Sensor1(D5);
+PinHcSr501 Sensor2(D6);
 
 // Setup the button reader
 int ButtonState      = 0;
@@ -111,6 +116,8 @@ void sendStatusResponse(IPAddress ip, int port){
   responseReplyBuffer[15] = (int) port2ThermoLogic.getHumidity();  // Set real humidity here. Hardcoded for now.
   responseReplyBuffer[16] = (int) ((port2ThermoLogic.getHumidity() - (int) port2ThermoLogic.getHumidity()) * 256.0);
 
+
+
   responseReplyBuffer[17] = 0x01;  // Set real amount of 110v outlets here
   responseReplyBuffer[18] = (int) ledPower / 256;  // Set real status of outlet here. There might be more than one
   responseReplyBuffer[19] = (int) (ledPower - (256 * responseReplyBuffer[11])) % 256;  // Set real status of outlet here. There might be more than one
@@ -131,10 +138,6 @@ void listenUdp(){
   int packetSize = UDP.parsePacket();
 
   if(packetSize){
-    // Serial.println("");
-    // Serial.print("Received packet of size ");
-    // Serial.print(packetSize);
-    // Serial.print("From ");
     IPAddress remote = UDP.remoteIP();
     for (int i =0; i < 4; i++){
       // Serial.print(remote[i], DEC);
@@ -142,8 +145,6 @@ void listenUdp(){
         // Serial.print(".");
       }
     }
-    // Serial.print(", port ");
-    // Serial.println(UDP.remotePort());
 
     // read the packet into packetBufffer
     UDP.read(packetBuffer,UDP_TX_PACKET_MAX_SIZE);
@@ -259,8 +260,8 @@ void setup()
 }
 
 
-void broadcastMovementDetectedAction(){
-  char buffer[4] = { 0x11, 0x00, 0x00, 0x01 };
+void broadcastMovementDetectedAction(int sensorNumber){
+  char buffer[4] = { 0x11, 0x00, 0x00, char(sensorNumber) };
   sendUdpBuffer( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888, buffer, 4);
 }
 
@@ -279,7 +280,6 @@ void broadcastCurrentStatus(){
 }
 
 void broadcastCurrentStatusPeriodically(){
-
   if(millis() < timeOfLastStream){
     // Reset the timer. It happens once every 4 or 5 days
     timeOfLastStream = 0;
@@ -297,6 +297,16 @@ void broadcastCurrentStatusPeriodically(){
 
 void handleMovementDetection(){
 
+  if(Sensor1.movementDetected()){
+    broadcastMovementDetectedAction(1);
+  }
+
+  if(Sensor2.movementDetected()){
+    broadcastMovementDetectedAction(2);
+  }
+
+  return ;
+
   if(!digitalRead(movementSensorDataPin)){
     return ;
   }
@@ -306,19 +316,6 @@ void handleMovementDetection(){
     return ;
   }
 
-  if(
-    timeOfLastMovement + 10000 < millis()
-     ||
-    timeOfLastMovement > millis() // To handle rollover after 72 minutes
-  ){
-    timeOfLastMovement = millis();
-    Serial.print("Last:");
-    Serial.print(timeOfLastMovement);
-    Serial.print("- Now:");
-    Serial.print(millis());
-    Serial.println("MOVIMIENTO!");
-    broadcastMovementDetectedAction();
-  }
 }
 
 void monitorButton(){
@@ -422,10 +419,8 @@ void loop(){
     Serial.print("*C , Humid: ");
     Serial.println(port1ThermoLogic.getHumidity());
   }
-
   port1ThermoLogic.calculatePower();
   port1ThermoLogic.writePwmValues();
-
 
   if(port2ThermoLogic.readSensorValues()){
     Serial.print("port2ThermoLogic values: Temp: ");
@@ -433,7 +428,6 @@ void loop(){
     Serial.print("*C , Humid: ");
     Serial.println(port2ThermoLogic.getHumidity());
   }
-
   port2ThermoLogic.calculatePower();
   port2ThermoLogic.writePwmValues();
 
@@ -442,4 +436,7 @@ void loop(){
   monitorButton();
   broadcastCurrentStatusPeriodically();
   handleMovementDetection();
+
+
+
 }

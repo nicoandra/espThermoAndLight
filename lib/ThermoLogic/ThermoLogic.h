@@ -26,13 +26,14 @@ class ThermoLogic
     int pwmTimeOfLastChange;
 
   public:
-    ThermoLogic (uint8_t pinDht, uint8_t dhtType, uint8_t pinRelay);
+    ThermoLogic (uint8_t pinDhtParam, uint8_t dhtTypeParam, uint8_t pinRelayParam);
     float getTemperature();
     bool setDesiredTemperature(float parameter);
     float getDesiredTemperature();
     float getHumidity();
     void calculatePower();
     int getPower();
-    boolean readSensorValues();
-    boolean writePwmValues();
+    bool readSensorValues();
+    bool writePwmValues();
+    void printValues();
 };

@@ -3,7 +3,10 @@
 #include <DHT_U.h>
 #include <ThermoLogic.h>
 
-ThermoLogic::ThermoLogic(uint8_t pinDht, uint8_t dhtType, uint8_t pinRelay) : dhtInstance(pinDht, dhtType) {
+ThermoLogic::ThermoLogic(uint8_t pinDhtParam, uint8_t dhtTypeParam, uint8_t pinRelayParam) : dhtInstance(pinDhtParam, dhtTypeParam) {
+  pinDht = pinDhtParam;
+  dhtType = dhtTypeParam;
+  pinRelay = pinRelayParam;
   pinMode(pinRelay, OUTPUT);
   digitalWrite(pinRelay, HIGH);
 };
@@ -30,7 +33,7 @@ int ThermoLogic::getPower(){
   return pwmPower;
 }
 
-boolean ThermoLogic::readSensorValues(){
+bool ThermoLogic::readSensorValues(){
 
   if(millis() < timeOfLastRead){
     // Reset the timer. It happens once every 4 or 5 days
@@ -91,7 +94,7 @@ void ThermoLogic::calculatePower(){
 }
 
 
-boolean ThermoLogic::writePwmValues(){
+bool ThermoLogic::writePwmValues(){
   if(pwmTimeOfLastChange > millis()){
     pwmTimeOfLastChange = 0;
   }
@@ -123,3 +126,16 @@ boolean ThermoLogic::writePwmValues(){
 
   return true;
 }
+
+void ThermoLogic::printValues(){
+    Serial.print("Relay: ");
+    Serial.print(pinRelay);
+    Serial.print("DHT: ");
+    Serial.print(pinDht);
+    Serial.print(" values: Temp: ");
+    Serial.print(getTemperature());
+    Serial.print("*C , Humid: ");
+    Serial.print(getHumidity());
+    Serial.print(" Power: ");
+    Serial.println(getPower());
+  }
