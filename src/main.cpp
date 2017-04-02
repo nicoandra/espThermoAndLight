@@ -34,8 +34,8 @@ char replyBuffer[32];
 
 
 // Setup a DHT22 instance
-ThermoLogic port1ThermoLogic(D6, DHT22, D3);
-ThermoLogic port2ThermoLogic(D4, DHT22, D7);  // 2nd Thermo
+ThermoLogic port1ThermoLogic(D1, DHT22, D3);
+ThermoLogic port2ThermoLogic(D2, DHT22, D4);  // 2nd Thermo
 
 PinHcSr501 Sensor1(D5);
 PinHcSr501 Sensor2(D6);
@@ -241,7 +241,6 @@ void setup()
   pinMode(D2, INPUT); // For the button
   digitalWrite(D2, HIGH);
 
-
   pinMode(movementSensorDataPin, INPUT); // For the movement detector sensor
   digitalWrite(movementSensorDataPin, LOW);
 
@@ -257,11 +256,15 @@ void setup()
     Serial.println("Listening UDP");
     listenUdp();
   }
+
+  Sensor1.setDelay(2000);
+  Sensor2.setDelay(2000);
+
 }
 
 
 void broadcastMovementDetectedAction(int sensorNumber){
-  char buffer[4] = { 0x11, 0x00, 0x00, char(sensorNumber) };
+  char buffer[4] = { 0x11, 0x00, 0x00, (char) sensorNumber };
   sendUdpBuffer( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888, buffer, 4);
 }
 
@@ -276,7 +279,7 @@ void broadcastButtonLongPress(){
 }
 
 void broadcastCurrentStatus(){
-  // sendStatusResponse({192, 168, 1, 255}, 8888);
+  sendStatusResponse( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888);
 }
 
 void broadcastCurrentStatusPeriodically(){
@@ -319,6 +322,7 @@ void handleMovementDetection(){
 }
 
 void monitorButton(){
+  return ;
   ButtonState = digitalRead(D2);
   if(ButtonState == 0 && PrevButtonState == 0){
     // Serial.println("BUTTON: No changes");
@@ -413,30 +417,24 @@ void loop(){
 
   listenUdp();
 
-  if(port1ThermoLogic.readSensorValues()){
-    Serial.print("port1ThermoLogic values: Temp: ");
-    Serial.print(port1ThermoLogic.getTemperature());
-    Serial.print("*C , Humid: ");
-    Serial.println(port1ThermoLogic.getHumidity());
-  }
+  port1ThermoLogic.readSensorValues();
   port1ThermoLogic.calculatePower();
   port1ThermoLogic.writePwmValues();
 
-  if(port2ThermoLogic.readSensorValues()){
-    Serial.print("port2ThermoLogic values: Temp: ");
-    Serial.print(port2ThermoLogic.getTemperature());
-    Serial.print("*C , Humid: ");
-    Serial.println(port2ThermoLogic.getHumidity());
-  }
+
+  port2ThermoLogic.readSensorValues();
   port2ThermoLogic.calculatePower();
   port2ThermoLogic.writePwmValues();
 
-  blinkLedAccordingToPower();
+  if(millis() % 5000 == 0){
+    port1ThermoLogic.printValues();
+    port2ThermoLogic.printValues();
+  }
 
-  monitorButton();
+  // blinkLedAccordingToPower();
+
+  // monitorButton();
   broadcastCurrentStatusPeriodically();
   handleMovementDetection();
-
-
 
 }

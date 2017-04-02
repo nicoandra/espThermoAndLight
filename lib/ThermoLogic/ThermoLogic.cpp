@@ -128,9 +128,9 @@ bool ThermoLogic::writePwmValues(){
 }
 
 void ThermoLogic::printValues(){
-    Serial.print("Relay: ");
+    Serial.print("PinRelay: ");
     Serial.print(pinRelay);
-    Serial.print("DHT: ");
+    Serial.print(" PinDHT: ");
     Serial.print(pinDht);
     Serial.print(" values: Temp: ");
     Serial.print(getTemperature());
