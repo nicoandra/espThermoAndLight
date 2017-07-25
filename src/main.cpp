@@ -16,12 +16,12 @@ https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266WebServer/exampl
 #include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
 
-
 // Thermostat functionality
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <DHT_U.h>
-#include "../lib/ThermoLogic/ThermoLogic.h"
+#include "../lib/ThermoLogic/ThermoLogic.h" // To read temperatures
+#include "../lib/PWMPin/PWMPin.h" // To read write analog values
 
 unsigned int localPort = 8888;
 WiFiUDP UDP;
@@ -185,22 +185,6 @@ void listenUdp(){
 
 } // End of void listenUdp();
 
-void ledOn(int pinNumber){
-  if(LED_BUILTIN == pinNumber){
-    digitalWrite(pinNumber, 0);
-    return ;
-  }
-  digitalWrite(pinNumber, 1);
-}
-
-
-void ledOff(int pinNumber){
-  if(LED_BUILTIN == pinNumber){
-    digitalWrite(pinNumber, 1);
-    return ;
-  }
-  digitalWrite(pinNumber, 0);
-}
 
 void setup()
 {
@@ -237,20 +221,6 @@ void setup()
 void broadcastMovementDetectedAction(){
   char buffer[4] = { 0x11, 0x00, 0x00, 0x01 };
   sendUdpBuffer( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888, buffer, 4);
-}
-
-void broadcastButtonAction(){
-  char buffer[4] = { 0x41, 0xFF, 0x00, 0x01 };
-  sendUdpBuffer( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888, buffer, 4);
-}
-
-void broadcastButtonLongPress(){
-  char buffer[4] = { 0x41, 0xFF, 0x00, 0x02 };
-  sendUdpBuffer( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888, buffer, 4);
-}
-
-void broadcastCurrentStatus(){
-  // sendStatusResponse({192, 168, 1, 255}, 8888);
 }
 
 void broadcastCurrentStatusPeriodically(){
@@ -295,44 +265,6 @@ void handleMovementDetection(){
     broadcastMovementDetectedAction();
   }
 }
-
-void monitorButton(){
-  ButtonState = digitalRead(D2);
-  if(ButtonState == 0 && PrevButtonState == 0){
-    // Serial.println("BUTTON: No changes");
-    return ;
-  }
-
-  if(ButtonState == 1 && PrevButtonState == 0){
-    Serial.println("BUTTON: PRESSED");
-    TimeWhenButtonWasPressed = millis();
-    PrevButtonState = 1;
-    return ;
-  }
-
-  if(ButtonState == 0 && PrevButtonState == 1){
-    if(IsALongPress){
-      Serial.println("BUTTON: RELEASED AFTER LONG PRESS. IGNORE.");
-    } else {
-      broadcastButtonAction();
-      Serial.println("BUTTON: RELEASED AFTER SHORT PRESS. ACTION!");
-
-    }
-    IsALongPress = false;
-    TimeWhenButtonWasPressed = 0;
-    PrevButtonState = ButtonState;
-    return ;
-  }
-
-  if(!IsALongPress && ButtonState == 1 && PrevButtonState == 1 && TimeWhenButtonWasPressed + 1500 < millis()){
-    Serial.println("BUTTON: STILL IN LONG PRESS");
-    broadcastButtonLongPress();
-    IsALongPress = true;
-    TimeWhenButtonWasPressed = millis();
-    return ;
-  }
-}
-
 
 
 void blinkLedAccordingToPower(){
