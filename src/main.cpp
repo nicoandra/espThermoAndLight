@@ -8,10 +8,11 @@ https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266WebServer/exampl
 
 **/
 
-
+#include <FS.h>
+#include <ArduinoJson.h>
+#include <PubSubClient.h>
 #include "Arduino.h"
 #include <ESP8266WiFi.h>          //ESP8266 Core WiFi Library (you most likely already have this in your sketch)
-
 #include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
 #include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
@@ -25,208 +26,411 @@ https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266WebServer/exampl
 #include <DHT_U.h>
 #include "../lib/ThermoLogic/ThermoLogic.h"
 
-unsigned int localPort = 8888;
-WiFiUDP UDP;
-boolean udpConnected = false;
-char packetBuffer[UDP_TX_PACKET_MAX_SIZE]; //buffer to hold incoming packet,
-// char ReplyBuffer[] = "Acknowledged";
-char replyBuffer[32];
+
+// MQTT settings
+char mqtt_server[40] = "192.168.1.106";
+char mqtt_port[6] = "1883";
+char device_name[32] = "ESP Dimmer";
 
 
-// Setup a DHT22 instance
-ThermoLogic port1ThermoLogic(D1, DHT22, D3);
-ThermoLogic port2ThermoLogic(D2, DHT22, D4);  // 2nd Thermo
+WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, 40);
+WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, 6);
+WiFiManagerParameter custom_device_name("device_name", "device name", device_name, 32);
 
-PinHcSr501 Sensor1(D5);
-PinHcSr501 Sensor2(D6);
-
-// Setup the button reader
-int ButtonState      = 0;
-int PrevButtonState = 0;
-unsigned long TimeWhenButtonWasPressed = millis();
-bool IsALongPress = false;
-
-uint32_t timeOfLastStream = 0;
-uint32_t timeOfLastMovement = 0;
-
-int movementSensorDataPin = D8;
+const int SUB_BUFFER_SIZE = JSON_OBJECT_SIZE(4) + JSON_ARRAY_SIZE(10);
+bool shouldSaveConfig = false;  //flag for saving data
 
 
-int ledOnOfPin = D0; // NOT IN USE
-int ledPower = 0;
 
-boolean connectUDP(){
-  boolean state = false;
+// Setup DHT22 instances (sensor data pin, sensor type, relay pin)
+ThermoLogic port1ThermoLogic(D1, DHT22, D2);
+ThermoLogic port2ThermoLogic(D3, DHT22, D4);
+ThermoLogic port3ThermoLogic(D5, DHT22, D6);
+
+PinHcSr501 Sensor1(D7);
+PinHcSr501 Sensor2(D8);
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+WiFiManager wifiManager;
+
+
+/* Internal variables */
+long lastAnnounceTime = 0;
+int allowAnnounce = 0;
+
+void resetOnDemand(){
+
+  if(!digitalRead(D0)){
+    return ;
+  }
+
+
+  if(millis() > 5000){
+    // Reset will be taken into account during the first 5 seconds
+    return ;
+  }
+
+  Serial.println("Resetting everything");
+  wifiManager.resetSettings();
+  SPIFFS.format();
+  Serial.println("Reboot in 2 seconds");
+  delay(2000);
+  ESP.restart();
+}
+
+bool doReadConfig(){
+  if (!SPIFFS.exists("/config.json")) {
+    // If Config file does not exist Force the Config page
+    Serial.println("doReadConfig: config file does not exist");
+    return false;
+  }
+
+  Serial.println("Reading config file");
+  File configFile = SPIFFS.open("/config.json", "r");
+  if (!configFile) {
+    Serial.println("Failed to load json config file");
+    // Force the Config page
+    return false;
+  }
+
+  Serial.println("Opened config file");
+  size_t size = configFile.size();
+  // Allocate a buffer to store contents of the file.
+  std::unique_ptr<char[]> buf(new char[size]);
+
+  configFile.readBytes(buf.get(), size);
+  DynamicJsonBuffer jsonBuffer;
+  JsonObject& json = jsonBuffer.parseObject(buf.get());
+  json.printTo(Serial);
+  Serial.println(" ...");
+  if (!json.success()) {
+    Serial.println("Failed to parse json config file");
+    // Force the Config page
+    return false;
+  }
+
+  strcpy(mqtt_server, json["mqtt_server"]);
+  strcpy(mqtt_port, json["mqtt_port"]);
+  strcpy(device_name, json["device_name"]);
+  Serial.println("Json parsed and configuration loaded from file");
+}
+
+void doSaveConfig(){
+  //save the custom parameters to FS
+  if (shouldSaveConfig) {
+
+    //read updated parameters
+    strcpy(mqtt_server, custom_mqtt_server.getValue());
+    strcpy(mqtt_port, custom_mqtt_port.getValue());
+    strcpy(device_name, custom_device_name.getValue());
+
+    Serial.println("Saving config");
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject& json = jsonBuffer.createObject();
+    json["mqtt_server"] = mqtt_server;
+    json["mqtt_port"] = mqtt_port;
+    json["device_name"] = device_name;
+
+    File configFile = SPIFFS.open("/config.json", "w");
+    if (!configFile) {
+      Serial.println("failed to open config file for writing");
+      return ;
+    }
+
+    json.printTo(Serial);
+    json.printTo(configFile);
+    configFile.close();
+    //end save
+    Serial.println("Config Saved! Wait 5 seconds");
+    delay(5000);
+    ESP.restart();
+  }
+}
+
+//callback notifying us of the need to save config
+void saveConfigCallback () {
+  Serial.println("Should save config");
+  shouldSaveConfig = true;
+  doSaveConfig();
+}
+
+String macAddress() {
+  String formatted = "";
+  char mac_address[20];
+  WiFi.macAddress().toCharArray(mac_address, 20);
+  for(int i = 0; i < 17; i++){
+    if(i == 2 || i == 5 || i == 8 || i == 11 || i == 14){
+      continue;
+    }
+    formatted = formatted + mac_address[i];
+  }
+  return formatted;
+}
+
+
+
+void announce(){
+  if( allowAnnounce == 0){
+    return ;
+  }
+
+  String mac_address = macAddress();
+  char message[2048];
+  DynamicJsonBuffer jsonBufferPub;
+
+  JsonObject& json = jsonBufferPub.createObject();
+  JsonArray& lights = json.createNestedArray("heaters");
+
+  Serial.println(mac_address);
+  json["mac_address"] = mac_address;
+  json["device_name"] = device_name;
+  // json["subscribed_to"] = "/lights/" + WiFi.macAddress();
+
+  /*for(int i = 1; i < 9; i++){
+    lights.add(channels[i - 1]);
+  }*/
+
+  json.printTo(message);
+  Serial.print("Publish message: ");
+  Serial.println(message);
+  client.publish("/device/announcement", message);
+}
+
+
+void reportMovement(int sensorId){
+  Serial.println("A MOVOEMENT WILL BE REPORTED. TODO.");
+}
+
+
+void configModeCallback (WiFiManager *myWiFiManager) {
+  Serial.println("Entered config mode");
+  Serial.println(WiFi.softAPIP());
+
+  Serial.println(myWiFiManager->getConfigPortalSSID());
+}
+
+
+
+void handleMovementDetection(){
+
+  if(Sensor1.movementDetected()){
+     reportMovement(1);
+  }
+
+  if(Sensor2.movementDetected()){
+    reportMovement(2);
+  }
+
+  return ;
+
+}
+
+
+
+
+
+void mqttMessageCallback(char* topicParam, byte* payloadParam, unsigned int length) {
+  allowAnnounce = 0;
+  /*char topic[255];
+  strcpy(topic, topicParam);
+  */
+  if( length > 254 ){
+    return ;
+  }
+
+  char payload[255] = "";
+  strncpy(payload, (char *)payloadParam, length);
+
+  /*
+  Serial.print("Payload: ");
+  Serial.print(payload);
+  */
+
+  StaticJsonBuffer<SUB_BUFFER_SIZE> jsonBufferSub;
+  JsonObject& jsonPayload = jsonBufferSub.parseObject(payload);
+  /*
+  Serial.print(" - Parsed: ");
+  jsonPayload.printTo(Serial);
+  Serial.println("***");
+  */
+
+
+  // TODO:: READ WHO SENT THE MESSAGE. IF IT'S MYSELF, IGNORE IT.
+  if((String) topicParam == (String) "/controllers/"){
+    JsonVariant sender = jsonPayload["mac_address"];
+    if(!sender.success()){
+      // Serial.print("No sender. Reject.");
+      return ;
+    }
+
+    /*
+    Serial.print("My MAC: ");
+    Serial.println(macAddress());
+    Serial.print("Sender: ");
+    Serial.println(sender.as<char*>());
+    */
+
+    if(macAddress() == sender.as<char*>()){
+      // Serial.print("My own message. Reject.");
+      return ;
+    }
+
+    Serial.print("Good message from ");
+    Serial.println(sender.as<char*>());
+    JsonArray& values = jsonPayload["lights"];
+
+    if(!values.success()){
+      Serial.println("No lights section.");
+      return ;
+    }
+
+    /*
+    for(int i = 0; i < values.size(); i++){
+      channels[i] = values[i];
+    }
+    */
+    return ;
+  }
+
+  Serial.print("Not a /controllers/ topic. Received in topic ");
+  Serial.print(topicParam);
+
+  allowAnnounce = 1;
+  return ;
+}
+
+
+void reconnect() {
+  // Loop until we're reconnected
+  // String topic = "/controllers/" + WiFi.macAddress();
+  String topic = "/heaters/";
+  char topicBuffer[255];
+  topic.toCharArray(topicBuffer, 255);
+
+  char mac_address[20];
+  WiFi.macAddress().toCharArray(mac_address, 20);
+
+
+  int tryes = 0;
+  while (!client.connected() && tryes < 10) {
+    Serial.print("Attempting MQTT connection...");
+    tryes++;
+    // Attempt to connect
+    if (client.connect( mac_address )) {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      client.publish("/device/announcement", "ESPHeater");
+      // ... and resubscribe
+      client.subscribe(topicBuffer);
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try #" + String(tryes) + " again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(1600);
+    }
+  }
+}
+
+
+
+
+void cycle(){
+  resetOnDemand();
+  if (!client.connected()) {
+    reconnect();
+  }
+
+  client.loop();
+
+  long now = millis();
+  if (now - lastAnnounceTime > 10000 || now < lastAnnounceTime) {
+    lastAnnounceTime = now;
+    announce();
+  }
+
+}
+
+void loop(){
+
+  // Try to announce
+  cycle();
+
+  port1ThermoLogic.readSensorValues();
+  port1ThermoLogic.calculatePower();
+  port1ThermoLogic.writePwmValues();
+
+
+  port2ThermoLogic.readSensorValues();
+  port2ThermoLogic.calculatePower();
+  port2ThermoLogic.writePwmValues();
+
+  if(millis() % 5000 == 0){
+    port1ThermoLogic.printValues();
+    port2ThermoLogic.printValues();
+  }
+
+  handleMovementDetection();
+
+}
+
+
+
+
+
+void setup() {
+  Serial.begin(115200);
+  Serial.print("ESP WiFi Heater controller and movement sensor. MAC: ");
+  Serial.println(WiFi.macAddress());
+
+  pinMode(D0, INPUT);
+  digitalWrite(D0, LOW);
+
+  if (!SPIFFS.begin()) {
+    Serial.println("Failed to mount FS in Setup.");
+    delay(10000);
+    ESP.restart();
+    return ;
+  }
+  Serial.println("Mounted file system.");
+
+  wifiManager.addParameter(&custom_mqtt_server);
+  wifiManager.addParameter(&custom_mqtt_port);
+  wifiManager.addParameter(&custom_device_name);
+  wifiManager.setSaveConfigCallback(saveConfigCallback);
+  wifiManager.setAPCallback(configModeCallback);
+
+  resetOnDemand();
+
+  while(!wifiManager.autoConnect("AutoConnectAP", "password")){
+    Serial.println("Can not connect to WiFi.");
+    delay(2000);
+  }
+
+  Serial.println("Wifi up. Try to load device settings from JSON");
+
+  if(!doReadConfig()){
+    Serial.println("Either can not read config, or can not connect. Loading portal!");
+    wifiManager.startConfigPortal("OnDemandAP");
+    Serial.println("Portal loaded");
+    return;
+  }
+
   Serial.println("");
-  Serial.println("Connecting to UDP");
+  Serial.println("WiFi connected!");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
 
-  if(UDP.begin(localPort) == 1){
-    Serial.println("Connection successful");
-    state = true;
-  } else {
-    Serial.println("Connection failed");
-  }
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(mqttMessageCallback);
 
-  return state;
+  Sensor1.setDelay(2000);
+  Sensor2.setDelay(2000);
+
 }
 
-void sendUdpBuffer(IPAddress host, int port, char buffer[], int length){
-    UDP.beginPacket(host, port);
-    UDP.write(buffer, length);
-    UDP.endPacket();
-}
-
-void sendUdpBufferResponse(char buffer[], int length){
-  sendUdpBuffer(UDP.remoteIP(), UDP.remotePort(), buffer, length);
-}
-
-void sendStatusResponse(IPAddress ip, int port){
-  char responseReplyBuffer[256];
-
-  responseReplyBuffer[0] = 0x31;
-  responseReplyBuffer[1] = 0xFF;
-  responseReplyBuffer[2] = 0x01;  // Set real count of heaters here. Hardcoded to 1 now.
-
-  responseReplyBuffer[3] = (int) port1ThermoLogic.getTemperature();
-  responseReplyBuffer[4] = (int) ((port1ThermoLogic.getTemperature() - (int) port1ThermoLogic.getTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
-
-  Serial.print("Response: desired temperature [1] is ");
-  Serial.println(port1ThermoLogic.getDesiredTemperature());
-
-  responseReplyBuffer[5] = (int) port1ThermoLogic.getDesiredTemperature();  // Set real temperature here. Hardcoded for now.
-  responseReplyBuffer[6] = (int) ((port1ThermoLogic.getDesiredTemperature() - (int) port1ThermoLogic.getDesiredTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
-
-  responseReplyBuffer[7] = (int) 1 + port1ThermoLogic.getPower() - 1;  // Set real power level of the heater here. Hardcoded for now.
-
-  responseReplyBuffer[8] = (int) port1ThermoLogic.getHumidity();  // Set real humidity here. Hardcoded for now.
-  responseReplyBuffer[9] = (int) ((port1ThermoLogic.getHumidity() - (int) port1ThermoLogic.getHumidity()) * 256.0);
-
-
-  Serial.print("Response: desired temperature [2] is ");
-  Serial.println(port2ThermoLogic.getDesiredTemperature());
-
-  responseReplyBuffer[10] = (int) port2ThermoLogic.getTemperature();
-  responseReplyBuffer[11] = (int) ((port2ThermoLogic.getTemperature() - (int) port2ThermoLogic.getTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
-
-  responseReplyBuffer[12] = (int) port2ThermoLogic.getDesiredTemperature();  // Set real temperature here. Hardcoded for now.
-  responseReplyBuffer[13] = (int) ((port2ThermoLogic.getDesiredTemperature() - (int) port2ThermoLogic.getDesiredTemperature()) * 256.0);  // Set real temperature here. Hardcoded for now.
-
-  responseReplyBuffer[14] = (int) 1 + port2ThermoLogic.getPower() - 1;  // Set real power level of the heater here. Hardcoded for now.
-
-  responseReplyBuffer[15] = (int) port2ThermoLogic.getHumidity();  // Set real humidity here. Hardcoded for now.
-  responseReplyBuffer[16] = (int) ((port2ThermoLogic.getHumidity() - (int) port2ThermoLogic.getHumidity()) * 256.0);
-
-
-
-  responseReplyBuffer[17] = 0x01;  // Set real amount of 110v outlets here
-  responseReplyBuffer[18] = (int) ledPower / 256;  // Set real status of outlet here. There might be more than one
-  responseReplyBuffer[19] = (int) (ledPower - (256 * responseReplyBuffer[11])) % 256;  // Set real status of outlet here. There might be more than one
-
-  // sendUdpBuffer(UDP.remoteIP(), remotePort, replyBuffer);
-  sendUdpBuffer(ip, port, responseReplyBuffer, 20);
-}
-
-void setLedPower(int value){
-  analogWrite(ledOnOfPin, constrain(value, 0, 1023));
-  ledPower = value;
-  Serial.print("LedPower set to");
-  Serial.println(ledPower);
-}
-
-void listenUdp(){
-  // if there’s data available, read a packet
-  int packetSize = UDP.parsePacket();
-
-  if(packetSize){
-    IPAddress remote = UDP.remoteIP();
-    for (int i =0; i < 4; i++){
-      // Serial.print(remote[i], DEC);
-      if (i < 3) {
-        // Serial.print(".");
-      }
-    }
-
-    // read the packet into packetBufffer
-    UDP.read(packetBuffer,UDP_TX_PACKET_MAX_SIZE);
-
-    if(packetSize != 4){
-      sendUdpBufferResponse((char *)"Unknown instruction", 20);
-      return ;
-    }
-
-    if(packetBuffer[0] == 0xFF && packetBuffer[1] == 0x00){
-        // Report myself to the requester IP and to the specified port
-		// Payload:	FF 00 XX YY => Ask heaters to report themselves to port XX * 256 + YY
-		// Response:	FF 00 XX YY => Sent to the port specified before. This reports how many temperature sensors and heater has XX, how many 110v outlets has YY
-        int remotePort = packetBuffer[2] * 256 + packetBuffer[3];
-        char buffer[4] = {0xFF, 0x00, 0x01, 0x01};
-        sendUdpBuffer(UDP.remoteIP(), remotePort, buffer, 4);    // Send real values here, with counts and everything
-        Serial.print("DiscoveryRequest: Sent reply [0xFF, 0x00, 0x01, 0x01] to port ");
-        Serial.println(remotePort);
-        return ;
-    }
-
-    if(packetBuffer[0] == 0x30 && packetBuffer[1] == 0xFF){
-        // Payload      30 FF XX YY =>  Requests for status to be sen back to port
-        // Response	    30 FF AA (Name BB CC DD) EE (FF) =>
-        int remotePort = packetBuffer[2] * 256 + packetBuffer[3];
-        sendStatusResponse(UDP.remoteIP(), remotePort);
-        // Serial.print("StatusRequest: Sent reply ");
-        // Serial.print(" to port ");
-        // Serial.println(remotePort);
-        return ;
-    }
-
-    if(packetBuffer[0] == 0x10){
-
-
-      if(packetBuffer[1] == 1){
-        float desiredTemperature = (float) (packetBuffer[2] / 1.0) + ((float) packetBuffer[3] / 0xFF);
-        port1ThermoLogic.setDesiredTemperature(desiredTemperature);
-        Serial.print("Setting desired temperature [1] to ");
-        Serial.println(desiredTemperature);
-      }
-
-      if(packetBuffer[1] == 2){
-        float desiredTemperature = (float) (packetBuffer[2] / 1.0) + ((float) packetBuffer[3] / 0xFF);
-        port2ThermoLogic.setDesiredTemperature(desiredTemperature);
-        Serial.print("Setting desired temperature [2] to ");
-        Serial.println(desiredTemperature);
-      }
-      sendStatusResponse(UDP.remoteIP(), UDP.remotePort());
-      // Serial.print("SetTemperature: Sent reply to port ");
-      // Serial.println(UDP.remotePort());
-      return ;
-    }
-
-    if(packetBuffer[0] == 0x20){
-      setLedPower(packetBuffer[2] * 256 + packetBuffer[3]);
-      sendStatusResponse(UDP.remoteIP(), UDP.remotePort());
-      return ;
-    }
-
-    return ;
-  } // End of if(packetSize);
-
-
-} // End of void listenUdp();
-
-void ledOn(int pinNumber){
-  if(LED_BUILTIN == pinNumber){
-    digitalWrite(pinNumber, 0);
-    return ;
-  }
-  digitalWrite(pinNumber, 1);
-}
-
-
-void ledOff(int pinNumber){
-  if(LED_BUILTIN == pinNumber){
-    digitalWrite(pinNumber, 1);
-    return ;
-  }
-  digitalWrite(pinNumber, 0);
-}
+/*
 
 void setup()
 {
@@ -256,185 +460,5 @@ void setup()
     Serial.println("Listening UDP");
     listenUdp();
   }
-
-  Sensor1.setDelay(2000);
-  Sensor2.setDelay(2000);
-
 }
-
-
-void broadcastMovementDetectedAction(int sensorNumber){
-  char buffer[4] = { 0x11, 0x00, 0x00, (char) sensorNumber };
-  sendUdpBuffer( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888, buffer, 4);
-}
-
-void broadcastButtonAction(){
-  char buffer[4] = { 0x41, 0xFF, 0x00, 0x01 };
-  sendUdpBuffer( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888, buffer, 4);
-}
-
-void broadcastButtonLongPress(){
-  char buffer[4] = { 0x41, 0xFF, 0x00, 0x02 };
-  sendUdpBuffer( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888, buffer, 4);
-}
-
-void broadcastCurrentStatus(){
-  sendStatusResponse( ~WiFi.subnetMask() | WiFi.gatewayIP(), 8888);
-}
-
-void broadcastCurrentStatusPeriodically(){
-  if(millis() < timeOfLastStream){
-    // Reset the timer. It happens once every 4 or 5 days
-    timeOfLastStream = 0;
-  }
-
-  if(timeOfLastStream + 5000 > millis()){
-    // Not read. Read has been done already
-    return;
-  }
-
-  timeOfLastStream = millis();
-  broadcastCurrentStatus();
-
-}
-
-void handleMovementDetection(){
-
-  if(Sensor1.movementDetected()){
-    broadcastMovementDetectedAction(1);
-  }
-
-  if(Sensor2.movementDetected()){
-    broadcastMovementDetectedAction(2);
-  }
-
-  return ;
-
-  if(!digitalRead(movementSensorDataPin)){
-    return ;
-  }
-
-  if(millis() < 65000){
-    Serial.println("Sensor's still Initializing ...");
-    return ;
-  }
-
-}
-
-void monitorButton(){
-  return ;
-  ButtonState = digitalRead(D2);
-  if(ButtonState == 0 && PrevButtonState == 0){
-    // Serial.println("BUTTON: No changes");
-    return ;
-  }
-
-  if(ButtonState == 1 && PrevButtonState == 0){
-    Serial.println("BUTTON: PRESSED");
-    TimeWhenButtonWasPressed = millis();
-    PrevButtonState = 1;
-    return ;
-  }
-
-  if(ButtonState == 0 && PrevButtonState == 1){
-    if(IsALongPress){
-      Serial.println("BUTTON: RELEASED AFTER LONG PRESS. IGNORE.");
-    } else {
-      broadcastButtonAction();
-      Serial.println("BUTTON: RELEASED AFTER SHORT PRESS. ACTION!");
-
-    }
-    IsALongPress = false;
-    TimeWhenButtonWasPressed = 0;
-    PrevButtonState = ButtonState;
-    return ;
-  }
-
-  if(!IsALongPress && ButtonState == 1 && PrevButtonState == 1 && TimeWhenButtonWasPressed + 1500 < millis()){
-    Serial.println("BUTTON: STILL IN LONG PRESS");
-    broadcastButtonLongPress();
-    IsALongPress = true;
-    TimeWhenButtonWasPressed = millis();
-    return ;
-  }
-}
-
-
-
-void blinkLedAccordingToPower(){
-  int power = (int) 1 + port1ThermoLogic.getPower() - 1;
-
-  if(power == 0){
-    // When power is off, the led will turn ON once every 5 seconds, for 1/10th of a second
-    if(millis() % 5000 == 0 || (millis() - 100) % 5000 == 0){
-      if(millis() % 5000 == 0){
-        ledOn(LED_BUILTIN);
-      } else {
-        ledOff(LED_BUILTIN);
-      }
-    }
-    return;
-  }
-
-  if(power == 5){
-    if(
-      millis() % 5000 == 0 ||
-      (millis() - 100) % 5000 == 0 ||
-      (millis() - 500) % 5000 == 0 ||
-      (millis() - 600) % 5000 == 0){
-
-      if(millis() % 5000 == 0 || (millis() - 500) % 5000 == 0){
-          ledOn(LED_BUILTIN);
-        } else {
-          ledOff(LED_BUILTIN);
-        }
-        return;
-    }
-  }
-
-
-  if(power == 10){
-    if(
-      millis() % 5000 == 0 ||
-      (millis() - 100) % 5000 == 0 ||
-      (millis() - 500) % 5000 == 0 ||
-      (millis() - 600) % 5000 == 0 ||
-      (millis() - 1000) % 5000 == 0 ||
-      (millis() - 1100) % 5000 == 0
-    ){
-
-      if(millis() % 5000 == 0 || (millis() - 500) % 5000 == 0 || (millis() - 1000) % 5000 == 0){
-          ledOn(LED_BUILTIN);
-        } else {
-          ledOff(LED_BUILTIN);
-        }
-        return;
-    }
-  }
-}
-
-void loop(){
-
-  listenUdp();
-
-  port1ThermoLogic.readSensorValues();
-  port1ThermoLogic.calculatePower();
-  port1ThermoLogic.writePwmValues();
-
-
-  port2ThermoLogic.readSensorValues();
-  port2ThermoLogic.calculatePower();
-  port2ThermoLogic.writePwmValues();
-
-  if(millis() % 5000 == 0){
-    port1ThermoLogic.printValues();
-    port2ThermoLogic.printValues();
-  }
-
-  // blinkLedAccordingToPower();
-
-  // monitorButton();
-  broadcastCurrentStatusPeriodically();
-  handleMovementDetection();
-
-}
+*/
