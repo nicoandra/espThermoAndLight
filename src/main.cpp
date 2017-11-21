@@ -246,35 +246,30 @@ void mqttMessageCallback(char* topicParam, byte* payloadParam, unsigned int leng
   /*char topic[255];
   strcpy(topic, topicParam);
   */
-  if( length > 254 ){
+  if( length > 1024 ){
+    Serial.println("Message received, but longer than the max allowed length. Exiting.")
     return ;
   }
 
-  char payload[255] = "";
+  char payload[1024] = "";
   strncpy(payload, (char *)payloadParam, length);
-
-  /*
   Serial.print("Payload: ");
   Serial.print(payload);
-  */
+
 
   StaticJsonBuffer<SUB_BUFFER_SIZE> jsonBufferSub;
   JsonObject& jsonPayload = jsonBufferSub.parseObject(payload);
-  /*
   Serial.print(" - Parsed: ");
   jsonPayload.printTo(Serial);
   Serial.println("***");
-  */
-
 
   // TODO:: READ WHO SENT THE MESSAGE. IF IT'S MYSELF, IGNORE IT.
-  if((String) topicParam == (String) "/controllers/"){
+  if((String) topicParam.startsWith((String) "/heaters/"){
     JsonVariant sender = jsonPayload["mac_address"];
     if(!sender.success()){
-      // Serial.print("No sender. Reject.");
+      Serial.print("No sender. Reject.");
       return ;
     }
-
     /*
     Serial.print("My MAC: ");
     Serial.println(macAddress());
@@ -283,13 +278,13 @@ void mqttMessageCallback(char* topicParam, byte* payloadParam, unsigned int leng
     */
 
     if(macAddress() == sender.as<char*>()){
-      // Serial.print("My own message. Reject.");
+      Serial.print("My own message. Reject.");
       return ;
     }
 
     Serial.print("Good message from ");
     Serial.println(sender.as<char*>());
-    JsonArray& values = jsonPayload["lights"];
+    JsonArray& values = jsonPayload["heaters"];
 
     if(!values.success()){
       Serial.println("No lights section.");
@@ -304,7 +299,7 @@ void mqttMessageCallback(char* topicParam, byte* payloadParam, unsigned int leng
     return ;
   }
 
-  Serial.print("Not a /controllers/ topic. Received in topic ");
+  Serial.print("Not a /heaters/ topic. Received in topic ");
   Serial.print(topicParam);
 
   allowAnnounce = 1;
@@ -315,9 +310,6 @@ void mqttMessageCallback(char* topicParam, byte* payloadParam, unsigned int leng
 void reconnect() {
   // Loop until we're reconnected
   // String topic = "/controllers/" + WiFi.macAddress();
-  String topic = "/heaters/";
-  char topicBuffer[255];
-  topic.toCharArray(topicBuffer, 255);
 
   char mac_address[20];
   WiFi.macAddress().toCharArray(mac_address, 20);
@@ -333,7 +325,16 @@ void reconnect() {
       // Once connected, publish an announcement...
       client.publish("/device/announcement", "ESPHeater");
       // ... and resubscribe
+      String topic = "/heaters/";
+      char topicBuffer[255];
+      topic.toCharArray(topicBuffer, 255);
       client.subscribe(topicBuffer);
+
+      String topic = "/heaters/" + (String) macAddress();
+      char topicBuffer[255];
+      topic.toCharArray(topicBuffer, 255);
+      client.subscribe(topicBuffer);
+
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -349,6 +350,7 @@ void reconnect() {
 
 void cycle(){
   resetOnDemand();
+
   if (!client.connected()) {
     reconnect();
   }
@@ -381,10 +383,6 @@ void loop(){
   handleMovementDetection();
 
 }
-
-
-
-
 
 void setup() {
   Serial.begin(115200);
