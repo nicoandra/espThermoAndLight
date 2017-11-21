@@ -32,7 +32,6 @@ char mqtt_server[40] = "192.168.1.106";
 char mqtt_port[6] = "1883";
 char device_name[32] = "ESP Dimmer";
 
-
 WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, 40);
 WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, 6);
 WiFiManagerParameter custom_device_name("device_name", "device name", device_name, 32);
@@ -40,12 +39,15 @@ WiFiManagerParameter custom_device_name("device_name", "device name", device_nam
 const int SUB_BUFFER_SIZE = JSON_OBJECT_SIZE(4) + JSON_ARRAY_SIZE(10);
 bool shouldSaveConfig = false;  //flag for saving data
 
+// Used later on for dynamically creating a Json representation of an object
+DynamicJsonBuffer _buffer;
 
-
-// Setup DHT22 instances (sensor data pin, sensor type, relay pin)
-ThermoLogic port1ThermoLogic(D1, DHT22, D2);
-ThermoLogic port2ThermoLogic(D3, DHT22, D4);
-ThermoLogic port3ThermoLogic(D5, DHT22, D6);
+// Setup DHT22 instances (sensor data pin, sensor type, relay pin) in a fancy array
+ThermoLogic thermos[3] = {
+  ThermoLogic(D1, DHT22, D2),
+  ThermoLogic(D3, DHT22, D4),
+  ThermoLogic(D5, DHT22, D6)
+}
 
 PinHcSr501 Sensor1(D7);
 PinHcSr501 Sensor2(D8);
@@ -113,39 +115,39 @@ bool doReadConfig(){
   strcpy(mqtt_server, json["mqtt_server"]);
   strcpy(mqtt_port, json["mqtt_port"]);
   strcpy(device_name, json["device_name"]);
-  Serial.println("Json parsed and configuration loaded from file");
+  Serial.println("Json parsed and configuration loaded from file.");
 }
 
 void doSaveConfig(){
   //save the custom parameters to FS
-  if (shouldSaveConfig) {
-
-    //read updated parameters
-    strcpy(mqtt_server, custom_mqtt_server.getValue());
-    strcpy(mqtt_port, custom_mqtt_port.getValue());
-    strcpy(device_name, custom_device_name.getValue());
-
-    Serial.println("Saving config");
-    DynamicJsonBuffer jsonBuffer;
-    JsonObject& json = jsonBuffer.createObject();
-    json["mqtt_server"] = mqtt_server;
-    json["mqtt_port"] = mqtt_port;
-    json["device_name"] = device_name;
-
-    File configFile = SPIFFS.open("/config.json", "w");
-    if (!configFile) {
-      Serial.println("failed to open config file for writing");
-      return ;
-    }
-
-    json.printTo(Serial);
-    json.printTo(configFile);
-    configFile.close();
-    //end save
-    Serial.println("Config Saved! Wait 5 seconds");
-    delay(5000);
-    ESP.restart();
+  if (!shouldSaveConfig) {
+    return ;
   }
+  //read updated parameters
+  strcpy(mqtt_server, custom_mqtt_server.getValue());
+  strcpy(mqtt_port, custom_mqtt_port.getValue());
+  strcpy(device_name, custom_device_name.getValue());
+
+  Serial.println("Saving config");
+  DynamicJsonBuffer jsonBuffer;
+  JsonObject& json = jsonBuffer.createObject();
+  json["mqtt_server"] = mqtt_server;
+  json["mqtt_port"] = mqtt_port;
+  json["device_name"] = device_name;
+
+  File configFile = SPIFFS.open("/config.json", "w");
+  if (!configFile) {
+    Serial.println("failed to open config file for writing");
+    return ;
+  }
+
+  json.printTo(Serial);
+  json.printTo(configFile);
+  configFile.close();
+  //end save
+  Serial.println("Config Saved! Wait 5 seconds");
+  delay(5000);
+  ESP.restart();
 }
 
 //callback notifying us of the need to save config
@@ -168,33 +170,42 @@ String macAddress() {
   return formatted;
 }
 
-
-
 void announce(){
   if( allowAnnounce == 0){
     return ;
   }
+  allowAnnounce = 0;
 
   String mac_address = macAddress();
-  char message[2048];
+  char message[4096];
   DynamicJsonBuffer jsonBufferPub;
 
   JsonObject& json = jsonBufferPub.createObject();
-  JsonArray& lights = json.createNestedArray("heaters");
+  JsonArray& heaters = json.createNestedObject('heaters');
 
   Serial.println(mac_address);
   json["mac_address"] = mac_address;
   json["device_name"] = device_name;
-  // json["subscribed_to"] = "/lights/" + WiFi.macAddress();
 
-  /*for(int i = 1; i < 9; i++){
-    lights.add(channels[i - 1]);
-  }*/
+  JsonArray& heaters = json.createNestedObject('heaters');
+
+
+  for(int i = 0; i < sizeof(thermos); i++){
+    // As per https://github.com/bblanchon/ArduinoJson/issues/87
+    char* key = _buffer.alloc(4);
+    sprintf(key, "%d", i);
+    JsonObject& thisThermo = heaters.createNestedObject(key);
+    thisThermo["actualTemperature"] = thermos[i].getTemperature();
+    thisThermo["humidity"] = thermos[i].getHumidity();
+    thisThermo["power"] = thermos[i].getPower();
+    heaters.add(thisThermo);
+  }
 
   json.printTo(message);
   Serial.print("Publish message: ");
   Serial.println(message);
   client.publish("/device/announcement", message);
+  allowAnnounce = 1;
 }
 
 
@@ -353,22 +364,18 @@ void cycle(){
 }
 
 void loop(){
-
-  // Try to announce
   cycle();
 
-  port1ThermoLogic.readSensorValues();
-  port1ThermoLogic.calculatePower();
-  port1ThermoLogic.writePwmValues();
+  bool doPrint = millis() % 5000 == 0;
 
+  for(int i = 0; i < sizeof(thermos); i++){
+    thermos[i].readSensorValues();
+    thermos[i].calculatePower();
+    thermos[i].writePwmValues();
+    if(doPrint){
+      thermos[i].printValues();
+    }
 
-  port2ThermoLogic.readSensorValues();
-  port2ThermoLogic.calculatePower();
-  port2ThermoLogic.writePwmValues();
-
-  if(millis() % 5000 == 0){
-    port1ThermoLogic.printValues();
-    port2ThermoLogic.printValues();
   }
 
   handleMovementDetection();
