@@ -188,19 +188,17 @@ void announce(){
   json["mac_address"] = mac_address;
   json["device_name"] = device_name;
 
-  /*
-  JsonObject& heaters = json.createNestedObject('h');
+
+  JsonObject& heaters = json.createNestedObject("h");
 
   for(int i = 0; i < sizeof(thermos); i++){
     // As per https://github.com/bblanchon/ArduinoJson/issues/87
     sprintf(key, "%d", i);
-    // JsonObject& thisThermo = heaters.createNestedObject(F(key));
-    // thisThermo["actualTemperature"] = thermos[i].getTemperature();
-    // thisThermo["humidity"] = thermos[i].getHumidity();
-    // thisThermo["power"] = thermos[i].getPower();
+    JsonObject& thisThermo = heaters.createNestedObject(key);
+    thisThermo["actualTemperature"] = thermos[i].getTemperature();
+    thisThermo["humidity"] = thermos[i].getHumidity();
+    thisThermo["power"] = thermos[i].getPower();
   }
-
-  */
 
   json.printTo(message);
   Serial.print("Publish message: ");
