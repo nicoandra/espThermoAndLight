@@ -47,7 +47,7 @@ ThermoLogic thermos[3] = {
   ThermoLogic(D1, DHT22, D2),
   ThermoLogic(D3, DHT22, D4),
   ThermoLogic(D5, DHT22, D6)
-}
+};
 
 PinHcSr501 Sensor1(D7);
 PinHcSr501 Sensor2(D8);
@@ -171,6 +171,8 @@ String macAddress() {
 }
 
 void announce(){
+  char* key = (char*) _buffer.alloc(4);
+
   if( allowAnnounce == 0){
     return ;
   }
@@ -181,24 +183,20 @@ void announce(){
   DynamicJsonBuffer jsonBufferPub;
 
   JsonObject& json = jsonBufferPub.createObject();
-  JsonArray& heaters = json.createNestedObject('heaters');
 
   Serial.println(mac_address);
   json["mac_address"] = mac_address;
   json["device_name"] = device_name;
 
-  JsonArray& heaters = json.createNestedObject('heaters');
-
+  JsonObject& heaters = json.createNestedObject('h');
 
   for(int i = 0; i < sizeof(thermos); i++){
     // As per https://github.com/bblanchon/ArduinoJson/issues/87
-    char* key = _buffer.alloc(4);
     sprintf(key, "%d", i);
     JsonObject& thisThermo = heaters.createNestedObject(key);
     thisThermo["actualTemperature"] = thermos[i].getTemperature();
     thisThermo["humidity"] = thermos[i].getHumidity();
     thisThermo["power"] = thermos[i].getPower();
-    heaters.add(thisThermo);
   }
 
   json.printTo(message);
@@ -247,7 +245,7 @@ void mqttMessageCallback(char* topicParam, byte* payloadParam, unsigned int leng
   strcpy(topic, topicParam);
   */
   if( length > 1024 ){
-    Serial.println("Message received, but longer than the max allowed length. Exiting.")
+    Serial.println("Message received, but longer than the max allowed length. Exiting.");
     return ;
   }
 
@@ -264,7 +262,7 @@ void mqttMessageCallback(char* topicParam, byte* payloadParam, unsigned int leng
   Serial.println("***");
 
   // TODO:: READ WHO SENT THE MESSAGE. IF IT'S MYSELF, IGNORE IT.
-  if((String) topicParam.startsWith((String) "/heaters/"){
+  if( ((String) topicParam).startsWith("/heaters/")) {
     JsonVariant sender = jsonPayload["mac_address"];
     if(!sender.success()){
       Serial.print("No sender. Reject.");
@@ -330,18 +328,19 @@ void reconnect() {
       topic.toCharArray(topicBuffer, 255);
       client.subscribe(topicBuffer);
 
-      String topic = "/heaters/" + (String) macAddress();
-      char topicBuffer[255];
+      topic = "/heaters/" + (String) macAddress();
       topic.toCharArray(topicBuffer, 255);
       client.subscribe(topicBuffer);
 
     } else {
+
       Serial.print("failed, rc=");
       Serial.print(client.state());
       Serial.println(" try #" + String(tryes) + " again in 5 seconds");
       // Wait 5 seconds before retrying
       delay(1600);
     }
+
   }
 }
 
